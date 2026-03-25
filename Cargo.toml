@@ -1,0 +1,22 @@
+[package]
+name = "graynote"
+version = "1.0.0"
+edition = "2021"
+authors = ["Joshua Prince"]
+
+[dependencies]
+axum = { version = "0.8.8", features = ["http2", "ws"] }
+axum-server = "0.8.0"
+chrono = { version = "0.4.44", features = ["serde"] }
+dioxus = "0.7.3"
+dotenvy = "0.15.7"
+hex = { version = "0.4.3", features = ["serde"] }
+hmac_crate = { git = "https://github.com/DarthPrince2023/hmac_sha256", branch = "master" }
+jwt = { git = "https://github.com/DarthPrince2023/jwt-generator", branch = "main" }
+reqwest = "0.13.2"
+serde = { version = "1.0.228", features = ["derive", "serde_derive"] }
+serde_json = "1.0.149"
+sqlx = { version = "0.8.6", features = ["postgres", "runtime-tokio", "uuid", "chrono"] }
+subtle = "2.6.1"
+tokio = { version = "1.49.0", features = ["full"] }
+uuid = { version = "1.22.0", features = ["serde", "v4"] }

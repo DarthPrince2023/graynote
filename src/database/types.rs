@@ -1,0 +1,230 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
+use uuid::Uuid;
+
+#[derive(Debug, Deserialize, Serialize, FromRow, Default)]
+pub struct UserInfo {
+    #[serde(skip)]
+    pub user_id: Uuid,
+    pub user_handle: String,
+    pub password_id: String,
+    pub user_role: String,
+    #[serde(skip)]
+    pub created_at: DateTime<Utc>
+}
+
+impl UserInfo {
+    #[allow(unused)]
+    pub fn new(
+        user_id: Uuid,
+        user_handle: String,
+        password_id: String,
+        user_role: String,
+        created_at: DateTime<Utc>
+    ) -> Self {
+        Self {
+            user_id,
+            user_handle,
+            password_id,
+            user_role,
+            created_at
+        }
+    }
+
+    pub fn with_user_id(&mut self, user_id: Uuid) -> &mut Self {
+        self.user_id = user_id;
+
+        self
+    }
+
+    pub fn with_created_at(&mut self, created_at: DateTime<Utc>) -> &mut Self {
+        self.created_at = created_at;
+
+        self
+    }
+
+    pub fn with_role(&mut self, role: String) -> &mut Self {
+        self.user_role = role;
+
+        self
+    }
+
+    pub fn with_username(&mut self, username: String) -> &mut Self {
+        self.user_handle = username;
+
+        self
+    }
+
+    pub fn with_password(&mut self, password: String) -> &mut Self {
+        self.password_id = password;
+
+        self
+    }
+}
+
+///
+/// This object stores the information of a given user, everything necessary to identify a user across sessions.
+/// 
+/// Fields
+/// 
+/// user_id: The ID of the user in the database
+/// 
+/// username: The name attached to the session
+/// 
+/// password: Shh, we don't talk about this.
+/// 
+/// active_tokens: A vector we check against our user token against, to maintain session tokens.
+/// 
+/// created_at: The Chrono Datetime UTC timestamp for when a user was originally created in the database. Used in creating tokens.
+/// 
+
+
+///
+/// `'CaseInformation'` is a type that we can pull from the database regarding a case. 
+///
+#[derive(Debug, Deserialize, Serialize, FromRow)]
+pub struct CaseInformation {
+    #[serde(skip)]
+    pub case_number: Uuid,
+    pub user_id: Uuid,
+    pub suspect_name: Option<String>,
+    pub suspect_aliases: Vec<String>,
+    pub suspect_description: Option<String>,
+    pub suspect_phone: Option<String>,
+    pub suspect_email: Option<String>,
+    pub suspect_ip: Option<String>,
+    pub victim_name: String,
+    pub victim_email: Option<String>,
+    pub victim_phone: Option<String>,
+    #[serde(skip)]
+    pub timestamp_case: Option<DateTime<Utc>>
+}
+
+impl Default for CaseInformation {
+    fn default() -> Self {
+        Self {
+            case_number: Uuid::default(),
+            user_id: Uuid::default(),
+            suspect_name: None,
+            suspect_aliases: Vec::new(),
+            suspect_description: None,
+            suspect_email: None,
+            suspect_phone: None,
+            suspect_ip: None,
+            victim_name: String::new(),
+            victim_phone: None,
+            victim_email: None,
+            timestamp_case: Some(Utc::now())
+        }
+    }
+}
+
+#[derive(Debug, FromRow, Deserialize, Serialize)]
+pub struct CaseAccess {
+    pub case_information: CaseInformation,
+    pub token: String
+}
+
+#[derive(Debug, FromRow, Deserialize, Serialize)]
+pub struct UserAccessManagement {
+    pub case_number: Uuid,
+    pub token: String,
+    pub target_user: Uuid
+}
+
+///
+/// Token type for routing logic implementing the JSON payload routes only accepting a token
+/// 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Token {
+    pub value: String
+}
+
+///
+/// Type for abstracting away case info (ie getting case info, getting notes)
+///
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CaseDefinition {
+    pub case_number: Uuid,
+    pub token: String
+}
+
+///
+/// The `'Notes'` type is used for getting notes relevant to a case and/or it's relevant evidence
+///
+#[derive(Debug, Deserialize, FromRow, Serialize)]
+pub struct Notes {
+    #[serde(skip)]
+    pub note_id: Uuid,
+    pub case_number: Uuid,
+    pub user_id: Option<Uuid>,
+    pub note_text: String,
+    pub relevant_media: Vec<String>,
+    pub token: String,
+    #[serde(skip)]
+    pub entry_timestamp: Option<DateTime<Utc>>
+}
+
+impl Default for Notes {
+    fn default() -> Self {
+        Self {
+            note_id: Uuid::default(),
+            case_number: Uuid::default(),
+            user_id: None,
+            note_text: String::new(),
+            relevant_media: Vec::new(),
+            token: String::new(),
+            entry_timestamp: Some(DateTime::<Utc>::default())
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BasicLoginFlow {
+    pub username: String,
+    pub password: String
+}
+
+#[derive(Debug, FromRow, Deserialize, Serialize, Clone)]
+pub struct UserAccessControl {
+    #[serde(skip)]
+    param_id: Uuid,
+    user_id: Uuid,
+    case_number: Option<Uuid>,
+    note_id: Option<Uuid>,
+    #[serde(skip)]
+    token: String
+}
+
+impl UserAccessControl {
+    pub fn new(user_id: Uuid, case_number: Option<Uuid>, note_id: Option<Uuid>) -> Self {
+        Self {
+            param_id: Uuid::new_v4(),
+            user_id,
+            case_number,
+            note_id,
+            token: String::new()
+        }
+    }
+
+    pub fn get_param_id(&self) -> Uuid {
+        self.param_id
+    }
+
+    pub fn get_user_id(&self) -> Uuid {
+        self.user_id
+    }
+
+    pub fn get_case_number(&self) -> Option<Uuid> {
+        self.case_number
+    }
+
+    pub fn get_note_id(&self) -> Option<Uuid> {
+        self.note_id
+    }
+
+    pub fn get_token(&self) -> &String {
+        &self.token
+    }
+}

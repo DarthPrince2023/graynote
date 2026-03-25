@@ -1,0 +1,24 @@
+volumes:
+  locker: {}
+
+services:
+  locker-backend:
+    build:
+      dockerfile: ./Dockerfile
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+  locker-db:
+    image: postgres:latest
+    ports:
+      - "5433:5432"
+    volumes:
+      - locker:/var/lib/postgres/data
+      - ./src/database/postgres/migrations/structure.sql:/docker-entrypoint-initdb.d/structure.sql
+    environment:
+      - POSTGRES_PORT=${DATABASE_PORT}
+      - POSTGRES_URL=${DATABASE_HOST}
+      - POSTGRES_DB=${DATABASE_SCHEMA}
+      - POSTGRES_USER=${DATABASE_USER}
+      - POSTGRES_PASSWORD=${DATABASE_PASSWORD}

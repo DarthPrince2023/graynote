@@ -1,0 +1,11 @@
+{
+  "user_id": "00000000-0000-0000-0000-000000000000", 
+  "suspect_name": "John Doe",
+  "suspect_aliases": ["The Ghost", "JD"],
+  "suspect_description": "Approx 6ft, wearing a grey hoodie.",
+  "suspect_phone": "555-0199",
+  "suspect_email": "jd@example.com",
+  "suspect_ip": "192.168.1.45",
+  "victim_name": "Central Bank",
+  "token": "[ADMIN_JWT_HERE]"
+}
