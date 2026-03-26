@@ -9,6 +9,8 @@ use sqlx::{
     Postgres, Pool, Error as SqlxError,
     postgres::PgPoolOptions
 };
+use tracing_log::log::info;
+use tracing_subscriber::{EnvFilter, fmt};
 use std::{
     env::{
         VarError, var
@@ -36,12 +38,15 @@ impl SharedState {
     /// instantiate a new shared state instance for our service
     /// 
     pub async fn new() -> Result<Self, Error> {
+        Self::init_tracing();
+
         // Attempt to get a postgres connection
+        info!("Retrieving necessary environment variables");
         let url = &var("DATABASE_URL")?;
         let key = var("MASTER_KEY")?;
-        
-        // Set this to true in a production environment, otherwise, set to false at your own consideration.
         let use_https_strict_rule: bool = var("RESTRICT_HTTPS_ONLY")?.parse()?;
+        
+        info!("Trying to connect to Database");
         let postgres_pool = PgPoolOptions::new()
             .min_connections(1)
             .max_connections(10)
@@ -49,6 +54,7 @@ impl SharedState {
             .await?;
 
         // Get a request sender
+        info!("Construction HTTP request client");
         let client = reqwest::ClientBuilder::new()
             .https_only(use_https_strict_rule)
             .build()?;
@@ -60,6 +66,14 @@ impl SharedState {
                 key
             }
         )
+    }
+
+    pub fn init_tracing() {
+        let tracing_filter = EnvFilter::try_from_default_env()
+            .unwrap_or(EnvFilter::new("info"));
+        fmt()
+            .with_env_filter(tracing_filter)
+            .init();
     }
 }
 

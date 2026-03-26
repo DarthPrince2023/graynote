@@ -3,6 +3,7 @@ use axum::{
     response::IntoResponse
 };
 use serde_json::json;
+use tracing_log::log::info;
 
 use crate::{
     database::{
@@ -103,6 +104,7 @@ pub async fn find_accessible_notes(State(shared_state): State<SharedState>, Json
 }
 
 pub async fn add_uac_member(State(shared_state): State<SharedState>, Json(uac_management): Json<UserAccessManagement>) -> impl IntoResponse {
+    info!("Adding access for case to user");
     match shared_state.postgres_pool.add_uac_member(uac_management.case_number, uac_management.token, uac_management.target_user).await {
         Ok(()) => return (
             StatusCode::CREATED,
@@ -116,6 +118,7 @@ pub async fn add_uac_member(State(shared_state): State<SharedState>, Json(uac_ma
 }
 
 pub async fn insert_note(State(shared_state): State<SharedState>, Json(note): Json<Notes>) -> impl IntoResponse {
+    info!("Adding note to case...");
     match shared_state.postgres_pool.insert_note(note).await {
         Ok(()) => return (
             StatusCode::CREATED,
