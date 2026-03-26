@@ -123,22 +123,32 @@ impl Default for CaseInformation {
 #[derive(Debug, FromRow, Deserialize, Serialize)]
 pub struct CaseAccess {
     pub case_information: CaseInformation,
+    pub session_id: String,
     pub token: String
 }
 
 #[derive(Debug, FromRow, Deserialize, Serialize)]
 pub struct UserAccessManagement {
+    pub session_id: String,
     pub case_number: Uuid,
     pub token: String,
     pub target_user: Uuid
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CaseDetails {
+    pub case_number: Uuid,
+    pub token: String,
+    pub session_id: String
 }
 
 ///
 /// Token type for routing logic implementing the JSON payload routes only accepting a token
 /// 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Token {
-    pub value: String
+pub struct AuthToken {
+    pub token: String,
+    pub session_id: String
 }
 
 ///
@@ -162,6 +172,7 @@ pub struct Notes {
     pub note_text: String,
     pub relevant_media: Vec<String>,
     pub token: String,
+    pub session_id: String,
     #[serde(skip)]
     pub entry_timestamp: Option<DateTime<Utc>>
 }
@@ -175,6 +186,7 @@ impl Default for Notes {
             note_text: String::new(),
             relevant_media: Vec::new(),
             token: String::new(),
+            session_id: String::new(),
             entry_timestamp: Some(DateTime::<Utc>::default())
         }
     }

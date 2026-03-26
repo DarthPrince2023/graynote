@@ -7,7 +7,7 @@ use tracing_log::log::info;
 
 use crate::{
     database::{
-        Database, types::{CaseAccess, CaseDefinition, Notes, Token, UserAccessManagement, UserInfo}
+        Database, types::{AuthToken, CaseAccess, CaseDetails, Notes, UserAccessManagement, UserInfo}
     },
     routes::{
         SharedState, client_modifier::BasicAuth
@@ -23,28 +23,13 @@ pub async fn create_user(State(state): State<SharedState>, Json(user): Json<User
 
 pub async fn basic_login(State(state): State<SharedState>, Json(basic_auth): Json<BasicAuth>) -> impl IntoResponse {
     match state.postgres_pool.login_basic(basic_auth).await {
-        Ok(token) => return (StatusCode::OK, json!({"message": "Logged in successfully.", "token": token}).to_string()),
+        Ok(token) => return (StatusCode::OK, json!({"message": "Logged in successfully.", "token": token.0, "session_id": token.1}).to_string()),
         Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "Failed to authenticate user", "error": error}).to_string())
     }
 }
 
-pub async fn get_user_data(State(shared_state): State<SharedState>, Json(basic_auth): Json<BasicAuth>) -> impl IntoResponse {
-    let user_info = match shared_state.postgres_pool.get_user_data(&basic_auth.username, &basic_auth.password.expect("password")).await {
-        Ok(user_info) => user_info,
-        Err(_) => return (
-                StatusCode::NOT_FOUND,
-                json!({"message":"The requested resource could not be found."}).to_string()
-            )
-    };
-    let Ok(user_info) = serde_json::to_string(&user_info) else {
-        return (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "could not build response message"}).to_string())
-    };
-
-    return (StatusCode::OK, user_info)
-}
-
-pub async fn get_case_information(State(shared_state): State<SharedState>, Json(case): Json<CaseDefinition>) -> impl IntoResponse {
-    let case_info = match shared_state.postgres_pool.get_case_information(case.case_number, case.token).await {
+pub async fn get_case_information(State(shared_state): State<SharedState>, Json(case): Json<CaseDetails>) -> impl IntoResponse {
+    let case_info = match shared_state.postgres_pool.get_case_information(case).await {
         Ok(case_info) => case_info,
         Err(_) => return (
                 StatusCode::NOT_FOUND,
@@ -58,8 +43,8 @@ pub async fn get_case_information(State(shared_state): State<SharedState>, Json(
     return (StatusCode::OK, case_info)
 }
 
-pub async fn get_case_notes(State(shared_state): State<SharedState>, Json(case): Json<CaseDefinition>) -> impl IntoResponse {
-    let case_notes = match shared_state.postgres_pool.get_case_notes(case.case_number, case.token).await {
+pub async fn get_case_notes(State(shared_state): State<SharedState>, Json(case): Json<CaseDetails>) -> impl IntoResponse {
+    let case_notes = match shared_state.postgres_pool.get_case_notes(case).await {
         Ok(case_notes) => case_notes,
         Err(_) => return (
                 StatusCode::NOT_FOUND,
@@ -73,8 +58,8 @@ pub async fn get_case_notes(State(shared_state): State<SharedState>, Json(case):
     return (StatusCode::OK, case_notes)
 }
 
-pub async fn find_accessible_cases(State(shared_state): State<SharedState>, Json(token): Json<Token>) -> impl IntoResponse {
-    let cases = match shared_state.postgres_pool.find_accessible_cases(token.value).await {
+pub async fn find_accessible_cases(State(shared_state): State<SharedState>, Json(token): Json<AuthToken>) -> impl IntoResponse {
+    let cases = match shared_state.postgres_pool.find_accessible_cases(token.token, token.session_id).await {
         Ok(cases) => cases,
         Err(_) => return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -88,8 +73,8 @@ pub async fn find_accessible_cases(State(shared_state): State<SharedState>, Json
     return (StatusCode::OK, cases)
 }
 
-pub async fn find_accessible_notes(State(shared_state): State<SharedState>, Json(token): Json<Token>) -> impl IntoResponse {
-    let notes = match shared_state.postgres_pool.find_accessible_notes(token.value).await {
+pub async fn find_accessible_notes(State(shared_state): State<SharedState>, Json(token): Json<AuthToken>) -> impl IntoResponse {
+    let notes = match shared_state.postgres_pool.find_accessible_notes(token.session_id, token.token).await {
         Ok(notes) => notes,
         Err(_) => return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -105,7 +90,7 @@ pub async fn find_accessible_notes(State(shared_state): State<SharedState>, Json
 
 pub async fn add_uac_member(State(shared_state): State<SharedState>, Json(uac_management): Json<UserAccessManagement>) -> impl IntoResponse {
     info!("Adding access for case to user");
-    match shared_state.postgres_pool.add_uac_member(uac_management.case_number, uac_management.token, uac_management.target_user).await {
+    match shared_state.postgres_pool.add_uac_member(uac_management.case_number, uac_management.token, uac_management.session_id, uac_management.target_user).await {
         Ok(()) => return (
             StatusCode::CREATED,
             "Added user access to case"

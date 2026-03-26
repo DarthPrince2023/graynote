@@ -1,3 +1,4 @@
+extern crate argon2;
 use axum::{Router, routing::post};
 use tokio::net::TcpListener;
 
@@ -16,7 +17,6 @@ async fn main() {
     let router = Router::new()
         .route("/add_user", post(PostRoutes::create_user))
         .route("/login", post(PostRoutes::basic_login))
-        .route("/user_info", post(PostRoutes::get_user_data))
         .route("/add_uac_member", post(PostRoutes::add_uac_member))
         .route("/case/create", post(PostRoutes::new_case))
         .route("/case/fetch", post(PostRoutes::get_case_information))

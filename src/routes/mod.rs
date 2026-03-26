@@ -1,5 +1,6 @@
 use dotenvy::Error as DotEnvError;
 use jwt::errors::Error as JwtError;
+use argon2::Error as Argon2Error;
 use reqwest::{
     Client, Error as ClientError
 };
@@ -92,7 +93,14 @@ pub enum Error {
     UserExists,
     UuidError,
     Unathorized,
-    JsonParseError
+    JsonParseError,
+    Argon2Error(String)
+}
+
+impl From<Argon2Error> for Error {
+    fn from(value: Argon2Error) -> Self {
+        Self::Argon2Error(value.to_string())
+    }
 }
 
 impl From<JsonError> for Error {
@@ -174,7 +182,8 @@ impl Display for Error {
             Self::UserExists => write!(f, "Could not create user, username exists."),
             Self::UuidError => write!(f, "Could not parse UUID"),
             Self::Unathorized => write!(f, "Unauthorized"),
-            Self::JsonParseError => write!(f, "Unable to parse JSON data")
+            Self::JsonParseError => write!(f, "Unable to parse JSON data"),
+            Self::Argon2Error(error) => write!(f, "Could not perform cryptographic hash operation on data => {error}")
         }
     }
 }

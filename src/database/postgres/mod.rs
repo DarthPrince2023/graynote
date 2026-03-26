@@ -3,17 +3,20 @@ use std::env::var;
 use crate::{
     database::{
         Database, types::{
-            CaseAccess, CaseInformation, Notes, UserInfo
+            CaseAccess, CaseDetails, CaseInformation, Notes, UserInfo
         }
     },
     routes::{Error, client_modifier::BasicAuth}
 };
+use argon2::Config;
 use chrono::{DateTime, Utc};
 use hmac_crate::algorithms::hmac_sha_256::sha256;
 use jwt::{constructor::TokenPieces, header::{Header, TokenType}, payload::Payload};
 use sqlx::{
     Pool, Postgres, query
 };
+use subtle::ConstantTimeEq;
+use tracing_log::log::info;
 use uuid::Uuid;
 
 ///
@@ -21,7 +24,7 @@ use uuid::Uuid;
 /// 
 impl Database for Pool<Postgres> {
     async fn user_exists(&self, username: &str) -> Result<bool, Error> {
-        match sqlx::query_as(
+        match sqlx::query(
             r#"
                 SELECT user_handle
                 FROM users
@@ -30,14 +33,17 @@ impl Database for Pool<Postgres> {
         )
         .bind(username)
         .fetch_optional(self)
-        .await {
-            Ok(Some(())) => return Ok(true),
-            Ok(None) => return Ok(false),
-            Err(error) => return Err(Error::from(error))
-        }
+        .await? {
+            Some(_) => return Ok(true),
+            None => return Ok(false)
+        };
     }
     
     async fn insert_user(&self, user: UserInfo) -> Result<(), Error> {
+        let salt = format!("{}{}", var("MASTER_KEY")?, Utc::now().timestamp());
+        let config = Config::default();
+        let hash = argon2::hash_encoded(user.password_id.as_bytes(), salt.as_bytes(), &config)?;
+
         if self.user_exists(&user.user_handle).await? {
             return Err(Error::UserExists);
         }
@@ -52,7 +58,7 @@ impl Database for Pool<Postgres> {
         )
             .bind(Uuid::new_v4())
             .bind(user.user_handle)
-            .bind(hex::encode(sha256(user.password_id.as_bytes().to_vec())))
+            .bind(&hash)
             .bind(user.user_role)
             .bind(Utc::now().naive_utc())
             .execute(self)
@@ -62,45 +68,49 @@ impl Database for Pool<Postgres> {
             };
     }
 
-    async fn login_basic(&self, basic_auth: BasicAuth) -> Result<String, Error> {
-        let key = var("MASTER_KEY")?;
-        let password_encrypt = match basic_auth.password {
-            Some(password) => password,
-            None => String::new()
-        };
-        let password_encrypt = sha256(password_encrypt.as_bytes().to_vec());
-        let user: UserInfo = match sqlx::query_as(
+    async fn login_basic(&self, basic_auth: BasicAuth) -> Result<(String, Uuid), Error> {
+        let user: Option<UserInfo> = match sqlx::query_as(
             "SELECT *
                 FROM users
-                WHERE user_handle = $1
-                AND password_id = $2;"
+                WHERE user_handle = $1;"
             )
             .bind(&basic_auth.username)
-            .bind(hex::encode(&password_encrypt))
-            .fetch_one(self)
+            .fetch_optional(self)
             .await {
                 Ok(user) => user, 
                 Err(error) => return Err(Error::from(error))
             };
-        let time = Utc::now().timestamp();
-        let header = Header::new("HS256".into(), TokenType::Jwt);
-        let payload = Payload::new(user.user_id.to_string(), time + 7 * 24 * 3_600, "Graynote_auth_service".into(), Uuid::new_v4(), user.user_role.into(), time - 1);
-        let token = TokenPieces::new(header, payload);
-        let token_string = token.build_jwt(&key)?;
 
-        match self.login_user(token_string.clone()).await {
-            Ok(()) => return Ok(token_string),
-            Err(error) => return Err(Error::from(error))
+        match user {
+            Some(user) => {
+                let time = Utc::now().timestamp();
+                let header = Header::new("HS256".into(), TokenType::Jwt);
+                let payload = Payload::new(user.user_id.to_string(), time + 7 * 24 * 3_600, "Graynote_auth_service".into(), Uuid::new_v4(), user.user_role.into(), time - 1);
+                let token = TokenPieces::new(header, payload);
+                
+                if !argon2::verify_encoded(&user.password_id, basic_auth.password.ok_or(Error::InvalidCredentials)?.as_bytes())? {
+                    return Err(Error::InvalidCredentials)
+                }
+
+                let token_string = token.build_jwt(&var("MASTER_KEY")?)?;
+
+                match self.login_user(token_string.clone()).await {
+                    Ok(session_id) => return Ok((token_string, session_id)),
+                    Err(error) => return Err(Error::from(error))
+                }
+            },
+            None => {
+                argon2::verify_encoded("$NULLHASHjnlnnkn$", b"DO NOT VERIFY.")?;
+                return Err(Error::InvalidCredentials)
+            }
         }
     }
 
     async fn insert_note(&self, note: Notes) -> Result<(), Error> {
-        let note_id = Uuid::new_v4();
-        let has_access = self.is_access_granted(note.token.clone(),Some(note.case_number), false).await.map_err(Error::from);
-        let Ok(true) = has_access else {
+        let has_access = self.is_access_granted(note.session_id, note.token.clone(),Some(note.case_number), false).await.map_err(Error::from);
+        let Ok((true, token_pieces)) = has_access else {
             return Err(Error::Unathorized)
         };
-        let token_pieces = TokenPieces::try_from(note.token.as_str())?;
 
         match query(
             r#"
@@ -118,7 +128,7 @@ impl Database for Pool<Postgres> {
                 );
                 "#
         )
-            .bind(note_id)
+            .bind(Uuid::new_v4())
             .bind(token_pieces.get_payload().sub)
             .bind(note.note_text)
             .bind(note.relevant_media)
@@ -132,9 +142,8 @@ impl Database for Pool<Postgres> {
     }
 
     async fn insert_case_information(&self, case_access: CaseAccess) -> Result<Uuid, Error> {
-        let token = case_access.token;
-        let has_access = self.is_access_granted(token, None, true).await.map_err(Error::from);
-        let Ok(true) = has_access else {
+        let has_access = self.is_access_granted(case_access.session_id, case_access.token, None, true).await.map_err(Error::from);
+        let Ok((true, _)) = has_access else {
             return Err(Error::Unathorized)
         };
         let case_number = Uuid::new_v4();
@@ -201,42 +210,15 @@ impl Database for Pool<Postgres> {
         }
     } 
 
-    async fn get_user_data(&self, username: &str, password: &str) -> Result<UserInfo, Error> {
-        let password = sha256(password.as_bytes().into());
-
-        match sqlx::query_as(
-            r#"
-                SELECT user_id,
-                    user_handle,
-                    password_id,
-                    user_role,
-                    created_at
-                FROM users
-                WHERE user_handle = $1
-                AND password_id = $2;
-            "#
-        )
-        .bind(username)
-        .bind(hex::encode(password))
-        .fetch_one(self)
-        .await {
-            Ok(user) => return Ok(user),
-            Err(error) => return Err(Error::from(error))
-        }
-    }
-
-    async fn get_case_information(&self, case_number: Uuid, token: String) -> Result<CaseInformation, Error> {
-        let has_access = self.is_access_granted(token.clone(),Some(case_number), false).await.map_err(Error::from);
-        println!("ACCESS => {has_access:?}");
-        let Ok(true) = has_access else {
+    async fn get_case_information(&self, case_details: CaseDetails) -> Result<CaseInformation, Error> {
+        let time = Utc::now();
+        let has_access = self.is_access_granted(case_details.session_id, case_details.token.clone(),Some(case_details.case_number), false).await.map_err(Error::from);
+        let Ok((true, pieces)) = has_access else {
             return Err(Error::Unathorized)
         };
-        println!("Authorized");
-        let token_pieces = TokenPieces::try_from(token.as_str())?;
-        let user_id: Uuid = token_pieces.get_payload().sub.parse()?;
-        println!("User => {user_id:?}");
-
-        let result: CaseInformation = match sqlx::query_as(
+        
+        info!("Authorized at {time}");
+        match sqlx::query_as(
             r#"
                 SELECT c.case_number,
                     c.user_id,
@@ -257,29 +239,20 @@ impl Database for Pool<Postgres> {
                 AND c.case_number = $2::uuid;
             "#
         )
-        .bind(user_id)
-        .bind(case_number)
+        .bind(pieces.get_payload().sub)
+        .bind(case_details.case_number)
         .fetch_one(self)
         .await {
-            Ok(data) => data,
-            Err(error) => {
-                println!("ERROR => {error:?}");
-
-                return Err(Error::from(error));
-            }
+            Ok(data) => return Ok(data),
+            Err(error) => return Err(Error::from(error))
         };
-        println!("CASE => {result:?}");
-
-        Ok(result)
     }
 
-    async fn get_case_notes(&self, case_number: Uuid, token: String) -> Result<Vec<Notes>, Error> {
-        let has_access = self.is_access_granted(token.clone(),Some(case_number), false).await.map_err(Error::from);
-        let Ok(true) = has_access else {
+    async fn get_case_notes(&self, case_details: CaseDetails) -> Result<Vec<Notes>, Error> {
+        let has_access = self.is_access_granted(case_details.session_id, case_details.token.clone(),Some(case_details.case_number), false).await.map_err(Error::from);
+        let Ok((true, pieces)) = has_access else {
             return Err(Error::Unathorized)
         };
-        let token_pieces = TokenPieces::try_from(token.as_str())?;
-        let user_id: Uuid = token_pieces.get_payload().sub.parse()?;
         
         match sqlx::query_as(
             r#"
@@ -296,8 +269,8 @@ impl Database for Pool<Postgres> {
                     AND n.case_number = $2::uuid;
             "#
         )
-            .bind(user_id)
-            .bind(case_number)
+            .bind(pieces.get_payload().sub)
+            .bind(case_details.case_number)
             .fetch_all(self)
             .await {
                 Ok(notes) => return Ok(notes),
@@ -305,40 +278,44 @@ impl Database for Pool<Postgres> {
             };
     }
 
-    async fn login_user(&self, token: String) -> Result<(), Error> {
+    async fn login_user(&self, token: String) -> Result<Uuid, Error> {
         let key_pieces = TokenPieces::try_from(token.as_str())?;
-        let user_id = key_pieces.get_payload().sub;
-        let user_id = Uuid::try_parse(user_id.as_str())?;
-        let token_hash = sha256(token.as_bytes().to_vec());
+        let payload = key_pieces.get_payload();
+        let Ok(user_id) = Uuid::try_parse(&payload.sub) else {
+            return Err(Error::JwtError)
+        };
         let expires_at = Utc::now().timestamp() + 7 * 24 * 3600;
         let expires_at = DateTime::from_timestamp_secs(expires_at);
+        let session_id = Uuid::new_v4();
 
         sqlx::query(
             r#"
                 INSERT
                 INTO auth_session (
+                    session_id,
                     user_id,
                     token_hash,
                     expires_at
                 ) VALUES (
-                    $1, $2, $3
+                    $1, $2, $3, $4
                 );
             "#
         )
+        .bind(session_id)
         .bind(user_id)
-        .bind(hex::encode(token_hash))
+        .bind(hex::encode(sha256(token.as_bytes().into())))
         .bind(expires_at)
         .execute(self)
         .await
         .map_err(Error::from)?;
 
-        Ok(())
+        Ok(session_id)
     }
 
     async fn add_uac_member(
-        &self, case_number: Uuid, token: String, target_user: Uuid
+        &self, case_number: Uuid, token: String, session_id: String, target_user: Uuid
     ) -> Result<(), Error> {
-        self.is_access_granted(token.clone(), Some(case_number), false).await?;
+        self.is_access_granted(session_id, token.clone(), Some(case_number), false).await?;
 
         let admin_token = TokenPieces::try_from(token.as_str())?;
         
@@ -367,14 +344,12 @@ impl Database for Pool<Postgres> {
         Ok(())
     }
 
-    async fn find_accessible_cases(&self, token: String) -> Result<Vec<CaseInformation>, Error> {
-        let has_access = self.is_access_granted(token.clone(), None, false).await;
+    async fn find_accessible_cases(&self, token: String, session_id: String) -> Result<Vec<CaseInformation>, Error> {
+        let has_access = self.is_access_granted(session_id, token.clone(), None, false).await;
 
-        let Ok(true) = has_access else {
+        let Ok((true, pieces)) = has_access else {
             return Err(Error::Unathorized)
         };
-
-        let token_pieces = TokenPieces::try_from(token.as_str())?;
         
         sqlx::query_as(
             r#"
@@ -396,20 +371,18 @@ impl Database for Pool<Postgres> {
             WHERE uac.user_id = $1;
             "#
         )
-        .bind(token_pieces.get_payload().sub)
+        .bind(pieces.get_payload().sub)
         .fetch_all(self)
         .await
         .map_err(Error::from)
     }
 
-    async fn find_accessible_notes(&self, token: String) -> Result<Vec<Notes>, Error> {
-        let has_access = self.is_access_granted(token.clone(), None, false).await;
+    async fn find_accessible_notes(&self, session_id: String, token: String) -> Result<Vec<Notes>, Error> {
+        let has_access = self.is_access_granted(session_id, token.clone(), None, false).await;
         
-        let Ok(true) = has_access else {
+        let Ok((true, user)) = has_access else {
             return Err(Error::Unathorized)
         };
-
-        let token_pieces = TokenPieces::try_from(token.as_str())?;
 
         sqlx::query_as(
             r#"
@@ -425,23 +398,21 @@ impl Database for Pool<Postgres> {
             WHERE uac.user_id = $1;
             "#
         )
-        .bind(token_pieces.get_payload().sub)
+        .bind(user.get_payload().sub)
         .fetch_all(self)
         .await
         .map_err(Error::from)
     }
 
-    async fn delete_invalid_token(&self, token: String) -> Result<bool, Error> {
-        let token = sha256(token.as_bytes().to_vec());
-
+    async fn delete_invalid_token(&self, session_id: String) -> Result<bool, Error> {
         match sqlx::query(
             r#"
                 DELETE
                 FROM auth_session
-                WHERE token_hash = $1;
+                WHERE session_id = $1;
             "#
         )
-        .bind(hex::encode(token))
+        .bind(session_id)
         .execute(self)
         .await {
             Ok(_) => return Ok(true),
@@ -449,44 +420,52 @@ impl Database for Pool<Postgres> {
         }
     }
 
-    async fn is_access_granted(&self, token: String, case_number: Option<Uuid>, create_post: bool) -> Result<bool, Error> {
-        let key = var("MASTER_KEY")?;
+    async fn is_access_granted(&self, session_id: String, token: String, case_number: Option<Uuid>, create_post: bool) -> Result<(bool, TokenPieces), Error> {
+        info!("Checking if user is allowed to access requested resource...");
         let token_pieces = TokenPieces::try_from(token.as_str())?;
-        let verified = token_pieces.verify_jwt(&key, &token)?;
+        let verified = token_pieces.verify_jwt(&var("MASTER_KEY")?, &token)?;
         let payload = verified.get_payload();
         let is_valid = payload.is_active;
-        let token_hash = sha256(token.as_bytes().to_vec());
-        println!("IS VALID => {is_valid}");
+        let current_time = Utc::now().timestamp();
+
+        if payload.exp <= current_time {
+            return Err(Error::JwtError)
+        }
+        
         if !is_valid {
-            self.delete_invalid_token(token).await?;
+            self.delete_invalid_token(session_id).await?;
 
             return Err(Error::JwtError);
         }
 
         // Next check the database for our hashed token.
-        let (user_id,): (Option<Uuid>,) = match sqlx::query_as(
+        let (user_id,  token_hash,): (Uuid, String,) = match sqlx::query_as(
             r#"
-                SELECT user_id
+                SELECT
+                    au.user_id,
+                    au.token_hash
                 FROM auth_session au
                 WHERE au.user_id = $1
-                AND au.token_hash = $2;
+                AND au.session_id = $2
+                AND au.expires_at > NOW();
             "#
         )
             .bind(Uuid::parse_str(&payload.sub)?)
-            .bind(hex::encode(token_hash))
+            .bind(session_id)
             .fetch_optional(self)
             .await? {
                 Some(id) => id,
-                None => {
-                    println!("BROKE HERE 1");
-                    
-                    return Err(Error::InvalidCredentials)
-                }
+                None => return Err(Error::InvalidCredentials)
             };
+        let bytes = hex::encode(sha256(token.as_bytes().into()));
+
+        if true != bool::from(token_hash.as_bytes().ct_eq(bytes.as_bytes())) {
+            return Err(Error::Unathorized)
+        }
 
         // Check if user is authorized to access the case
         if create_post {
-            return Ok(true)
+            return Ok((true, token_pieces))
         }
 
         match sqlx::query(
@@ -494,7 +473,7 @@ impl Database for Pool<Postgres> {
                 SELECT 1
                 FROM user_access_control uac
                 WHERE uac.user_id = $1
-                AND $2 IS NULL OR uac.case_number = $2
+                AND ($2 IS NULL OR uac.case_number = $2)
                 LIMIT 1;
             "#
         )
@@ -502,7 +481,7 @@ impl Database for Pool<Postgres> {
             .bind(case_number)
             .fetch_optional(self)
             .await? {
-                Some(_) => return Ok(true),
+                Some(_) => return Ok((true, token_pieces)),
                 None => return Err(Error::InvalidCredentials)
             };
     }
