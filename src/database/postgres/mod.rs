@@ -16,6 +16,7 @@ use sqlx::{
     Pool, Postgres, query
 };
 use subtle::ConstantTimeEq;
+use tracing::error;
 use tracing_log::log::info;
 use uuid::Uuid;
 
@@ -142,10 +143,11 @@ impl Database for Pool<Postgres> {
     }
 
     async fn insert_case_information(&self, case_access: CaseAccess) -> Result<Uuid, Error> {
-        let has_access = self.is_access_granted(case_access.session_id, case_access.token, None, true).await.map_err(Error::from);
-        let Ok((true, _)) = has_access else {
-            return Err(Error::Unathorized)
-        };
+        let has_access = self.is_access_granted(case_access.session_id, case_access.token, None, true).await?;
+        info!("Has access => {has_access:?}");
+        // let Ok((true, _)) = has_access else {
+        //     return Err(Error::Unathorized)
+        // };
         let case_number = Uuid::new_v4();
         let case_information = case_access.case_information;
 
@@ -423,47 +425,68 @@ impl Database for Pool<Postgres> {
     async fn is_access_granted(&self, session_id: String, token: String, case_number: Option<Uuid>, create_post: bool) -> Result<(bool, TokenPieces), Error> {
         info!("Checking if user is allowed to access requested resource...");
         let token_pieces = TokenPieces::try_from(token.as_str())?;
+        info!("TOKEN PIECES => {token_pieces:?}");
         let verified = token_pieces.verify_jwt(&var("MASTER_KEY")?, &token)?;
+        info!("Verified token => {verified:?}");
         let payload = verified.get_payload();
         let is_valid = payload.is_active;
         let current_time = Utc::now().timestamp();
 
+        info!("Checking payload expiration date");
         if payload.exp <= current_time {
+            error!("Expired here.");
             return Err(Error::JwtError)
         }
         
+        info!("Checking if token is valid");
         if !is_valid {
+            error!("Token not valid");
+
             self.delete_invalid_token(session_id).await?;
 
             return Err(Error::JwtError);
         }
 
         // Next check the database for our hashed token.
+        info!("Checking database auth tables");
         let (user_id,  token_hash,): (Uuid, String,) = match sqlx::query_as(
             r#"
                 SELECT
                     au.user_id,
                     au.token_hash
                 FROM auth_session au
-                WHERE au.user_id = $1
+                WHERE au.user_id = $1::uuid
                 AND au.session_id = $2
                 AND au.expires_at > NOW();
             "#
         )
             .bind(Uuid::parse_str(&payload.sub)?)
-            .bind(session_id)
+            .bind(Uuid::parse_str(&session_id)?)
             .fetch_optional(self)
-            .await? {
-                Some(id) => id,
-                None => return Err(Error::InvalidCredentials)
+            .await {
+                Ok(Some(id)) => id,
+                Ok(None) => {
+                    info!("Query executed, nothing found");
+
+                    (Uuid::default(), String::new())
+                },
+                Err(error) => {
+                    error!("{error:?}");
+
+                    return Err(Error::from(error));
+                }
             };
+
+        info!("Hex encoding hash");
         let bytes = hex::encode(sha256(token.as_bytes().into()));
 
+        info!("Checking if hash integrity is good");
         if true != bool::from(token_hash.as_bytes().ct_eq(bytes.as_bytes())) {
             return Err(Error::Unathorized)
         }
 
         // Check if user is authorized to access the case
+        info!("checking status");
         if create_post {
             return Ok((true, token_pieces))
         }

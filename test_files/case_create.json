@@ -1,11 +1,14 @@
 {
-  "user_id": "00000000-0000-0000-0000-000000000000", 
-  "suspect_name": "John Doe",
-  "suspect_aliases": ["The Ghost", "JD"],
-  "suspect_description": "Approx 6ft, wearing a grey hoodie.",
-  "suspect_phone": "555-0199",
-  "suspect_email": "jd@example.com",
-  "suspect_ip": "192.168.1.45",
-  "victim_name": "Fictional Publisher Inc.",
-  "token": "[ADMIN_JWT_HERE]"
+	"case_information": {
+  		"user_id": "", 
+  		"suspect_name": "",
+  		"suspect_aliases": ["", ""],
+  		"suspect_description": "",
+  		"suspect_phone": "",
+  		"suspect_email": "",
+  		"suspect_ip": "",
+  		"victim_name": ""
+	},
+  "token": "",
+	"session_id": ""
 }
