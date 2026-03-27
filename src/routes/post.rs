@@ -32,12 +32,12 @@ pub async fn get_case_information(State(shared_state): State<SharedState>, Json(
     let case_info = match shared_state.postgres_pool.get_case_information(case).await {
         Ok(case_info) => case_info,
         Err(_) => return (
-                StatusCode::NOT_FOUND,
-                json!({"message":"The requested resource could not be found."}).to_string()
+                StatusCode::UNAUTHORIZED,
+                json!({"message":"You are not authorized to access the requested resource."}).to_string()
             )
     };
     let Ok(case_info) = serde_json::to_string(&case_info) else {
-        return (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "could not build response message"}).to_string())
+        return (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "Could not build response message"}).to_string())
     };
 
     return (StatusCode::OK, case_info)
@@ -47,12 +47,12 @@ pub async fn get_case_notes(State(shared_state): State<SharedState>, Json(case):
     let case_notes = match shared_state.postgres_pool.get_case_notes(case).await {
         Ok(case_notes) => case_notes,
         Err(_) => return (
-                StatusCode::NOT_FOUND,
-                json!({"message":"The requested resource could not be found."}).to_string()
+                StatusCode::UNAUTHORIZED,
+                json!({"message": "You are not authorized to access the requested resource."}).to_string()
             )
     };
     let Ok(case_notes) = serde_json::to_string(&case_notes) else {
-        return (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "could not build response message"}).to_string())
+        return (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "Could not build response message."}).to_string())
     };
 
     return (StatusCode::OK, case_notes)
