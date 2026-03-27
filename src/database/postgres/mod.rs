@@ -35,9 +35,9 @@ impl Database for Pool<Postgres> {
         .bind(username)
         .fetch_optional(self)
         .await? {
-            Some(_) => return Ok(true),
-            None => return Ok(false)
-        };
+            Some(_) => Ok(true),
+            None => Ok(false)
+        }
     }
     
     async fn insert_user(&self, user: UserInfo) -> Result<(), Error> {
@@ -64,9 +64,9 @@ impl Database for Pool<Postgres> {
             .bind(Utc::now().naive_utc())
             .execute(self)
             .await {
-                Ok(_) => return Ok(()),
-                Err(error) => return Err(error.into())
-            };
+                Ok(_) => Ok(()),
+                Err(error) => Err(error.into())
+            }
     }
 
     async fn login_basic(&self, basic_auth: BasicAuth) -> Result<(String, Uuid), Error> {
@@ -79,14 +79,14 @@ impl Database for Pool<Postgres> {
             .fetch_optional(self)
             .await {
                 Ok(user) => user, 
-                Err(error) => return Err(Error::from(error))
+                Err(error) => return Err(error.into())
             };
 
         match user {
             Some(user) => {
                 let time = Utc::now().timestamp();
                 let header = Header::new("HS256".into(), TokenType::Jwt);
-                let payload = Payload::new(user.user_id.to_string(), time + 7 * 24 * 3_600, "Graynote_auth_service".into(), Uuid::new_v4(), user.user_role.into(), time - 1);
+                let payload = Payload::new(user.user_id.to_string(), time + 7 * 24 * 3_600, "Graynote_auth_service".into(), Uuid::new_v4(), user.user_role, time - 1);
                 let token = TokenPieces::new(header, payload);
                 
                 if !argon2::verify_encoded(&user.password_id, basic_auth.password.ok_or(Error::InvalidCredentials)?.as_bytes())? {
@@ -96,19 +96,20 @@ impl Database for Pool<Postgres> {
                 let token_string = token.build_jwt(&var("MASTER_KEY")?)?;
 
                 match self.login_user(token_string.clone()).await {
-                    Ok(session_id) => return Ok((token_string, session_id)),
-                    Err(error) => return Err(Error::from(error))
+                    Ok(session_id) => Ok((token_string, session_id)),
+                    Err(error) => Err(error)
                 }
             },
             None => {
                 argon2::verify_encoded("$NULLHASHjnlnnkn$", b"DO NOT VERIFY.")?;
-                return Err(Error::InvalidCredentials)
+
+                Err(Error::InvalidCredentials)
             }
         }
     }
 
     async fn insert_note(&self, note: Notes) -> Result<(), Error> {
-        let has_access = self.is_access_granted(note.session_id, note.token.clone(),Some(note.case_number), true).await.map_err(Error::from);
+        let has_access = self.is_access_granted(note.session_id, note.token.clone(),Some(note.case_number), true).await;
         let Ok((true, token_pieces)) = has_access else {
             return Err(Error::Unathorized)
         };
@@ -137,17 +138,15 @@ impl Database for Pool<Postgres> {
             .bind(note.case_number)
             .execute(self)
             .await {
-                Ok(_) => return Ok(()),
-                Err(error) => return Err(Error::from(error))
+                Ok(_) => Ok(()),
+                Err(error) => Err(Error::from(error))
             }
     }
 
     async fn insert_case_information(&self, case_access: CaseAccess) -> Result<Uuid, Error> {
-        let has_access = self.is_access_granted(case_access.session_id, case_access.token, None, true).await?;
-        info!("Has access => {has_access:?}");
-        // let Ok((true, _)) = has_access else {
-        //     return Err(Error::Unathorized)
-        // };
+        if !self.is_access_granted(case_access.session_id, case_access.token, None, true).await?.0 {
+            return Err(Error::Unathorized)
+        };
         let case_number = Uuid::new_v4();
         let case_information = case_access.case_information;
 
@@ -207,13 +206,13 @@ impl Database for Pool<Postgres> {
         .bind(case_number)
         .execute(self)
         .await {
-            Ok(_) => return Ok(case_number),
-            Err(error) => return Err(Error::from(error))
+            Ok(_) => Ok(case_number),
+            Err(error) => Err(Error::from(error))
         }
     } 
 
     async fn get_case_information(&self, case_details: CaseDetails) -> Result<CaseInformation, Error> {
-        let has_access = self.is_access_granted(case_details.session_id, case_details.token.clone(),Some(case_details.case_number), true).await.map_err(Error::from);
+        let has_access = self.is_access_granted(case_details.session_id, case_details.token.clone(),Some(case_details.case_number), true).await;
         let Ok((true, pieces)) = has_access else {
             return Err(Error::Unathorized)
         };
@@ -243,13 +242,13 @@ impl Database for Pool<Postgres> {
         .bind(case_details.case_number)
         .fetch_one(self)
         .await {
-            Ok(data) => return Ok(data),
-            Err(error) => return Err(Error::from(error))
-        };
+            Ok(data) => Ok(data),
+            Err(error) => Err(Error::from(error))
+        }
     }
 
     async fn get_case_notes(&self, case_details: CaseDetails) -> Result<Vec<Notes>, Error> {
-        let has_access = self.is_access_granted(case_details.session_id, case_details.token.clone(),Some(case_details.case_number), true).await.map_err(Error::from);
+        let has_access = self.is_access_granted(case_details.session_id, case_details.token.clone(),Some(case_details.case_number), true).await;
         let Ok((true, pieces)) = has_access else {
             return Err(Error::Unathorized)
         };
@@ -273,9 +272,9 @@ impl Database for Pool<Postgres> {
             .bind(case_details.case_number)
             .fetch_all(self)
             .await {
-                Ok(notes) => return Ok(notes),
-                Err(error) => return Err(Error::from(error))
-            };
+                Ok(notes) => Ok(notes),
+                Err(error) => Err(Error::from(error))
+            }
     }
 
     async fn login_user(&self, token: String) -> Result<Uuid, Error> {
@@ -306,8 +305,7 @@ impl Database for Pool<Postgres> {
         .bind(hex::encode(sha256(token.as_bytes().into())))
         .bind(expires_at)
         .execute(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(session_id)
     }
@@ -338,8 +336,7 @@ impl Database for Pool<Postgres> {
         .bind(target_user)
         .bind(case_number)
         .execute(self)
-        .await
-        .map_err(Error::from)?;
+        .await?;
 
         Ok(())
     }
@@ -415,8 +412,8 @@ impl Database for Pool<Postgres> {
         .bind(session_id)
         .execute(self)
         .await {
-            Ok(_) => return Ok(true),
-            Err(error) => return Err(Error::from(error))
+            Ok(_) => Ok(true),
+            Err(error) => Err(Error::from(error))
         }
     }
 
@@ -426,17 +423,18 @@ impl Database for Pool<Postgres> {
         let verified = token_pieces.verify_jwt(&var("MASTER_KEY")?, &token)?;
         let payload = verified.get_payload();
         let is_valid = payload.is_active;
-        let current_time = Utc::now().timestamp();
 
+        // For all events that depend on the timestamp, we want to get the exact timestamp.
         info!("Checking payload expiration date");
-        if payload.exp <= current_time {
-            error!("Expired here.");
+        if payload.exp <= Utc::now().timestamp() {
+            error!("This token is expired as of {:?}.", DateTime::from_timestamp_secs(payload.exp));
 
             return Err(Error::JwtError)
         }
         
         info!("Checking if token is valid");
         if !is_valid {
+            // Token is not valid, delete it to declutter the table.
             error!("Token not valid");
 
             self.delete_invalid_token(session_id).await?;
@@ -481,8 +479,8 @@ impl Database for Pool<Postgres> {
         let bytes = hex::encode(sha256(token.as_bytes().into()));
 
         info!("Checking if hash integrity is good");
-        if true != bool::from(token_hash.as_bytes().ct_eq(bytes.as_bytes())) {
-            warn!("Invalid token received");
+        if !bool::from(token_hash.as_bytes().ct_eq(bytes.as_bytes())) {
+            warn!("Unauthorized token received");
 
             return Err(Error::Unathorized)
         }
@@ -490,13 +488,15 @@ impl Database for Pool<Postgres> {
         // Check if user is authorized to access the case
         info!("checking status");
         if create_post {
+            // We want to maintain the exact time the request was officially "authorized" for documentation purposes.
             info!("Authorized at {}", Utc::now());
 
-            return Ok((true, token_pieces))
+            Ok((true, token_pieces))
         } else {
+            // Same as above, but for when an unauthorized attempt was made.
             error!("Unauthorized request at {}", Utc::now());
 
-            return Ok((false, token_pieces))
+            Ok((false, token_pieces))
         }
     }
 }

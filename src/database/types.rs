@@ -77,12 +77,8 @@ impl UserInfo {
 /// active_tokens: A vector we check against our user token against, to maintain session tokens.
 /// 
 /// created_at: The Chrono Datetime UTC timestamp for when a user was originally created in the database. Used in creating tokens.
-/// 
-
-
 ///
 /// `'CaseInformation'` is a type that we can pull from the database regarding a case. 
-///
 #[derive(Debug, Deserialize, Serialize, FromRow)]
 pub struct CaseInformation {
     #[serde(skip)]
@@ -130,7 +126,7 @@ pub struct CaseAccess {
 #[derive(Debug, FromRow, Deserialize, Serialize)]
 pub struct UserAccessManagement {
     pub session_id: String,
-    pub token: String,
+    pub token: String,  
     pub case_number: Uuid,
     pub target_user: Uuid
 }

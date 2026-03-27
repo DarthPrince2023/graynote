@@ -136,11 +136,11 @@ impl ClientBuilder {
         };
 
         if let Some(auth) = &self.bearer_auth {
-            return request_client.bearer_auth(auth)
+            request_client.bearer_auth(auth)
         } else if let Some(auth) = &self.basic_auth {
-            return request_client.basic_auth(auth.username.to_string(), auth.password.clone());
+            request_client.basic_auth(auth.username.to_string(), auth.password.clone())
         } else {
-            return request_client;
+            request_client
         }
     }
 

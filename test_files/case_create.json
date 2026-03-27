@@ -1,6 +1,6 @@
 {
 	"case_information": {
-  		"user_id": "", 
+  		"user_id": "730cb3d9-4ebe-4746-b48a-eead6f45768c", 
   		"suspect_name": "Jane Smith",
   		"suspect_aliases": ["NightFox", "JS"],
   		"suspect_description": "Approx 5ft 7in, black jacket, frequently uses VPN services.",
@@ -9,6 +9,6 @@
   		"suspect_ip": "192.168.1.87",
   		"victim_name": "Acme Publishing LLC"
 	},
-    "token": "",
-	"session_id": ""
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3MzBjYjNkOS00ZWJlLTQ3NDYtYjQ4YS1lZWFkNmY0NTc2OGMiLCJleHAiOjE3NzUyMzA5NDksImlzcyI6IkdyYXlub3RlX2F1dGhfc2VydmljZSIsIm5iZiI6MTc3NDYyNjE0OCwianRpIjoiNWQ1MzYwZmMtZWYwMi00OWU3LWI0YzMtMWQ0YmMxY2YyNDAyIiwicm9sZSI6ImFkbWluIiwiaXNfYWN0aXZlIjpmYWxzZX0.XjQoXdUxIz8vNqJQXM0CnpZWMJHwUkAuLMxbZtijRSE",
+	"session_id": "34dc8574-8e64-49b2-853e-f99421e92d80"
 }
