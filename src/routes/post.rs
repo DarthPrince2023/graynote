@@ -4,12 +4,11 @@ use axum::{
 };
 use chrono::Utc;
 use serde_json::json;
-use tracing::{error, instrument};
-use tracing_log::log::info;
+use tracing::{error, info};
 
 use crate::{
     database::{
-        Database, types::{AuthToken, CaseAccess, CaseDetails, Notes, UserAccessManagement, UserInfo}
+        Database, types::{AdminUserInfoRequest, AuthToken, CaseAccess, CaseDetails, Notes, UserAccessManagement, UserInfo}
     },
     routes::{
         SharedState, client_modifier::BasicAuth
@@ -83,6 +82,21 @@ pub async fn find_accessible_notes(State(shared_state): State<SharedState>, Json
     };
 
     (StatusCode::OK, notes_string)
+}
+
+pub async fn fetch_user_info_admin(State(shared_state): State<SharedState>, Json(admin_request): Json<AdminUserInfoRequest>) -> impl IntoResponse {
+    match shared_state.postgres_pool.admin_get_user_info(admin_request).await {
+        Ok(user) => {
+            info!("Retrieved user info at {}", Utc::now());
+
+            (StatusCode::OK, json!({"message": "Retrieval success", "user": user}).to_string())
+        },
+        Err(error_message) => {
+            error!("Could not fetch user information => {error_message}");
+
+            (StatusCode::UNAUTHORIZED, json!({"message": "Could not look up user information"}).to_string())
+        }
+    }
 }
 
 pub async fn add_uac_member(State(shared_state): State<SharedState>, Json(uac_management): Json<UserAccessManagement>) -> impl IntoResponse {

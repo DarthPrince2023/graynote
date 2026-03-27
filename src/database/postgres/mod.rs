@@ -456,7 +456,16 @@ impl Database for Pool<Postgres> {
         let pieces = TokenPieces::try_from(token.as_str())?
             .verify_jwt(&var("MASTER_KEY")?, &token)?;
         let payload = pieces.get_payload();
+        let allowed_admins = var("DESIGNATED_ADMIN_USERS")?;
+        let allowed_admins: Vec<&str> = allowed_admins.split(",").collect();
 
+        if !allowed_admins.contains(&payload.sub.as_str()) &&
+            payload.role.contains("admin") {
+                error!("Unauthorized admin attempt at {} for user {}", Utc::now(), &payload.sub);
+
+                return Err(Error::Unathorized)
+        };
+        
         // For all events that depend on the timestamp, we want to get the exact timestamp.
         info!("Checking payload expiration date");
         if payload.exp <= Utc::now().timestamp() {
