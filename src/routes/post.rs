@@ -93,11 +93,11 @@ pub async fn add_uac_member(State(shared_state): State<SharedState>, Json(uac_ma
     match shared_state.postgres_pool.add_uac_member(uac_management.case_number, uac_management.token, uac_management.session_id, uac_management.target_user).await {
         Ok(()) => return (
             StatusCode::CREATED,
-            "Added user access to case"
+            json!({"message":"Added user access to case"}).to_string()
         ),
         Err(_) => return (
             StatusCode::INTERNAL_SERVER_ERROR,
-            "Could not grant access for user"
+            json!({"message":"Could not grant access for user"}).to_string()
         )
     };
 }

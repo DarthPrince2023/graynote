@@ -16,7 +16,7 @@ use sqlx::{
     Pool, Postgres, query
 };
 use subtle::ConstantTimeEq;
-use tracing::error;
+use tracing::{error, warn};
 use tracing_log::log::info;
 use uuid::Uuid;
 
@@ -108,7 +108,7 @@ impl Database for Pool<Postgres> {
     }
 
     async fn insert_note(&self, note: Notes) -> Result<(), Error> {
-        let has_access = self.is_access_granted(note.session_id, note.token.clone(),Some(note.case_number), false).await.map_err(Error::from);
+        let has_access = self.is_access_granted(note.session_id, note.token.clone(),Some(note.case_number), true).await.map_err(Error::from);
         let Ok((true, token_pieces)) = has_access else {
             return Err(Error::Unathorized)
         };
@@ -213,13 +213,11 @@ impl Database for Pool<Postgres> {
     } 
 
     async fn get_case_information(&self, case_details: CaseDetails) -> Result<CaseInformation, Error> {
-        let time = Utc::now();
-        let has_access = self.is_access_granted(case_details.session_id, case_details.token.clone(),Some(case_details.case_number), false).await.map_err(Error::from);
+        let has_access = self.is_access_granted(case_details.session_id, case_details.token.clone(),Some(case_details.case_number), true).await.map_err(Error::from);
         let Ok((true, pieces)) = has_access else {
             return Err(Error::Unathorized)
         };
         
-        info!("Authorized at {time}");
         match sqlx::query_as(
             r#"
                 SELECT c.case_number,
@@ -251,7 +249,7 @@ impl Database for Pool<Postgres> {
     }
 
     async fn get_case_notes(&self, case_details: CaseDetails) -> Result<Vec<Notes>, Error> {
-        let has_access = self.is_access_granted(case_details.session_id, case_details.token.clone(),Some(case_details.case_number), false).await.map_err(Error::from);
+        let has_access = self.is_access_granted(case_details.session_id, case_details.token.clone(),Some(case_details.case_number), true).await.map_err(Error::from);
         let Ok((true, pieces)) = has_access else {
             return Err(Error::Unathorized)
         };
@@ -317,7 +315,7 @@ impl Database for Pool<Postgres> {
     async fn add_uac_member(
         &self, case_number: Uuid, token: String, session_id: String, target_user: Uuid
     ) -> Result<(), Error> {
-        self.is_access_granted(session_id, token.clone(), Some(case_number), false).await?;
+        self.is_access_granted(session_id, token.clone(), Some(case_number), true).await?;
 
         let admin_token = TokenPieces::try_from(token.as_str())?;
         
@@ -347,7 +345,7 @@ impl Database for Pool<Postgres> {
     }
 
     async fn find_accessible_cases(&self, token: String, session_id: String) -> Result<Vec<CaseInformation>, Error> {
-        let has_access = self.is_access_granted(session_id, token.clone(), None, false).await;
+        let has_access = self.is_access_granted(session_id, token.clone(), None, true).await;
 
         let Ok((true, pieces)) = has_access else {
             return Err(Error::Unathorized)
@@ -380,7 +378,7 @@ impl Database for Pool<Postgres> {
     }
 
     async fn find_accessible_notes(&self, session_id: String, token: String) -> Result<Vec<Notes>, Error> {
-        let has_access = self.is_access_granted(session_id, token.clone(), None, false).await;
+        let has_access = self.is_access_granted(session_id, token.clone(), None, true).await;
         
         let Ok((true, user)) = has_access else {
             return Err(Error::Unathorized)
@@ -425,9 +423,7 @@ impl Database for Pool<Postgres> {
     async fn is_access_granted(&self, session_id: String, token: String, case_number: Option<Uuid>, create_post: bool) -> Result<(bool, TokenPieces), Error> {
         info!("Checking if user is allowed to access requested resource...");
         let token_pieces = TokenPieces::try_from(token.as_str())?;
-        info!("TOKEN PIECES => {token_pieces:?}");
         let verified = token_pieces.verify_jwt(&var("MASTER_KEY")?, &token)?;
-        info!("Verified token => {verified:?}");
         let payload = verified.get_payload();
         let is_valid = payload.is_active;
         let current_time = Utc::now().timestamp();
@@ -435,6 +431,7 @@ impl Database for Pool<Postgres> {
         info!("Checking payload expiration date");
         if payload.exp <= current_time {
             error!("Expired here.");
+
             return Err(Error::JwtError)
         }
         
@@ -449,26 +446,29 @@ impl Database for Pool<Postgres> {
 
         // Next check the database for our hashed token.
         info!("Checking database auth tables");
-        let (user_id,  token_hash,): (Uuid, String,) = match sqlx::query_as(
+        let (token_hash,): (String,) = match sqlx::query_as(
             r#"
-                SELECT
-                    au.user_id,
-                    au.token_hash
+                SELECT au.token_hash
                 FROM auth_session au
+                LEFT JOIN user_access_control uac
+                ON uac.user_id = au.user_id
                 WHERE au.user_id = $1::uuid
                 AND au.session_id = $2
-                AND au.expires_at > NOW();
+                AND au.expires_at > NOW()
+                AND ($3 IS NULL OR uac.case_number = $3)
+                LIMIT 1;
             "#
         )
             .bind(Uuid::parse_str(&payload.sub)?)
             .bind(Uuid::parse_str(&session_id)?)
+            .bind(case_number)
             .fetch_optional(self)
             .await {
                 Ok(Some(id)) => id,
                 Ok(None) => {
-                    info!("Query executed, nothing found");
+                    warn!("Query executed, nothing found");
 
-                    (Uuid::default(), String::new())
+                    (String::new(),)
                 },
                 Err(error) => {
                     error!("{error:?}");
@@ -482,30 +482,21 @@ impl Database for Pool<Postgres> {
 
         info!("Checking if hash integrity is good");
         if true != bool::from(token_hash.as_bytes().ct_eq(bytes.as_bytes())) {
+            warn!("Invalid token received");
+
             return Err(Error::Unathorized)
         }
 
         // Check if user is authorized to access the case
         info!("checking status");
         if create_post {
-            return Ok((true, token_pieces))
-        }
+            info!("Authorized at {}", Utc::now());
 
-        match sqlx::query(
-            r#"
-                SELECT 1
-                FROM user_access_control uac
-                WHERE uac.user_id = $1
-                AND ($2 IS NULL OR uac.case_number = $2)
-                LIMIT 1;
-            "#
-        )
-            .bind(user_id)
-            .bind(case_number)
-            .fetch_optional(self)
-            .await? {
-                Some(_) => return Ok((true, token_pieces)),
-                None => return Err(Error::InvalidCredentials)
-            };
+            return Ok((true, token_pieces))
+        } else {
+            error!("Unauthorized request at {}", Utc::now());
+
+            return Ok((false, token_pieces))
+        }
     }
 }
