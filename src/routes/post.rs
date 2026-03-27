@@ -2,7 +2,9 @@ use axum::{
     Json, extract::State, http::StatusCode,
     response::IntoResponse
 };
+use chrono::Utc;
 use serde_json::json;
+use tracing::{error, instrument};
 use tracing_log::log::info;
 
 use crate::{
@@ -15,6 +17,7 @@ use crate::{
 };
 
 pub async fn create_user(State(state): State<SharedState>, Json(user): Json<UserInfo>) -> impl IntoResponse {
+    info!("Attempting to creater user");
     match state.postgres_pool.insert_user(user).await {
         Ok(()) => (StatusCode::CREATED, json!({"message": "User added."}).to_string()),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": error}).to_string())
@@ -22,6 +25,7 @@ pub async fn create_user(State(state): State<SharedState>, Json(user): Json<User
 }
 
 pub async fn basic_login(State(state): State<SharedState>, Json(basic_auth): Json<BasicAuth>) -> impl IntoResponse {
+    info!("Attempting login authorization");
     match state.postgres_pool.login_basic(basic_auth).await {
         Ok(token) => (StatusCode::OK, json!({"message": "Logged in successfully.", "token": token.0, "session_id": token.1}).to_string()),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "Failed to authenticate user", "error": error}).to_string())
@@ -29,12 +33,14 @@ pub async fn basic_login(State(state): State<SharedState>, Json(basic_auth): Jso
 }
 
 pub async fn get_case_information(State(shared_state): State<SharedState>, Json(case): Json<CaseDetails>) -> impl IntoResponse {
+    info!("Attempting to retrieve information about case");
     let case_info = match shared_state.postgres_pool.get_case_information(case).await {
         Ok(case_info) => case_info,
-        Err(_) => return (
-                StatusCode::UNAUTHORIZED,
-                json!({"message":"You are not authorized to access the requested resource."}).to_string()
-            )
+        Err(_) => {
+            error!("Unauthorized access attempt for resource at {}", Utc::now());
+
+            return (StatusCode::UNAUTHORIZED,json!({"message":"You are not authorized to access the requested resource."}).to_string())
+        }
     };
     let Ok(case_info) = serde_json::to_string(&case_info) else {
         return (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "Could not build response message"}).to_string())
@@ -46,10 +52,7 @@ pub async fn get_case_information(State(shared_state): State<SharedState>, Json(
 pub async fn get_case_notes(State(shared_state): State<SharedState>, Json(case): Json<CaseDetails>) -> impl IntoResponse {
     let case_notes = match shared_state.postgres_pool.get_case_notes(case).await {
         Ok(case_notes) => case_notes,
-        Err(_) => return (
-                StatusCode::UNAUTHORIZED,
-                json!({"message": "You are not authorized to access the requested resource."}).to_string()
-            )
+        Err(_) => return (StatusCode::UNAUTHORIZED, json!({"message": "You are not authorized to access the requested resource."}).to_string())
     };
     let Ok(case_notes) = serde_json::to_string(&case_notes) else {
         return (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "Could not build response message."}).to_string())
@@ -61,10 +64,7 @@ pub async fn get_case_notes(State(shared_state): State<SharedState>, Json(case):
 pub async fn find_accessible_cases(State(shared_state): State<SharedState>, Json(token): Json<AuthToken>) -> impl IntoResponse {
     let cases = match shared_state.postgres_pool.find_accessible_cases(token.token, token.session_id).await {
         Ok(cases) => cases,
-        Err(_) => return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            json!({"message": "Could not retrieve cases for user"}).to_string()
-        )
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "Could not retrieve cases for user"}).to_string())
     };
     let Ok(cases) = serde_json::to_string(&cases) else {
         return (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "Unable to serialize cases"}).to_string())
@@ -76,10 +76,7 @@ pub async fn find_accessible_cases(State(shared_state): State<SharedState>, Json
 pub async fn find_accessible_notes(State(shared_state): State<SharedState>, Json(token): Json<AuthToken>) -> impl IntoResponse {
     let notes = match shared_state.postgres_pool.find_accessible_notes(token.session_id, token.token).await {
         Ok(notes) => notes,
-        Err(_) => return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            json!({"message": "Could not fetch notes for user"}).to_string()
-        )
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "Could not fetch notes for user"}).to_string())
     };
     let Ok(notes_string) = serde_json::to_string(&notes) else {
         return (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "No accessible notes found for provided user"}).to_string())
@@ -91,28 +88,24 @@ pub async fn find_accessible_notes(State(shared_state): State<SharedState>, Json
 pub async fn add_uac_member(State(shared_state): State<SharedState>, Json(uac_management): Json<UserAccessManagement>) -> impl IntoResponse {
     info!("Adding access for case to user");
     match shared_state.postgres_pool.add_uac_member(uac_management.case_number, uac_management.token, uac_management.session_id, uac_management.target_user).await {
-        Ok(()) => (
-            StatusCode::CREATED,
-            json!({"message":"Added user access to case"}).to_string()
-        ),
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            json!({"message":"Could not grant access for user"}).to_string()
-        )
+        Ok(()) => (StatusCode::CREATED, json!({"message":"Added user access to case"}).to_string()),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, json!({"message":"Could not grant access for user"}).to_string())
     }
 }
 
 pub async fn insert_note(State(shared_state): State<SharedState>, Json(note): Json<Notes>) -> impl IntoResponse {
     info!("Adding note to case...");
-    match shared_state.postgres_pool.insert_note(note).await {
-        Ok(()) => (
-            StatusCode::CREATED,
-            "Added note to case"
-        ),
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Unable to create note for case due to error"
-        )
+    match shared_state.postgres_pool.insert_note(&note).await {
+        Ok(()) => {
+            info!("Note added to case by {} at {}.", note.user_id.expect("User ID"), Utc::now());
+
+            (StatusCode::CREATED,json!({"message": "Added note to case"}).to_string())
+        },
+        Err(error_message) => {
+            error!("Attempted note insertion at {}, error => {error_message}", Utc::now());
+
+            (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "Unable to create note for case due to error"}).to_string())
+        }
     }
 }
 
@@ -136,5 +129,3 @@ pub async fn new_case(State(shared_state): State<SharedState>, Json(case): Json<
             )
     }
 }
-
-

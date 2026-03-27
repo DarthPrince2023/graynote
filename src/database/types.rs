@@ -4,6 +4,13 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize, FromRow, Default)]
+pub struct AdminUserInfoRequest {
+    pub user_handle: String,
+    pub admin_session_id: Uuid,
+    pub admin_token: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, FromRow, Default)]
 pub struct UserInfo {
     #[serde(skip)]
     pub user_id: Uuid,
