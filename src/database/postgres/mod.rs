@@ -100,8 +100,6 @@ impl Database for Pool<Postgres> {
                 let header = Header::new("HS256".into(), TokenType::Jwt);
                 let payload = Payload::new(user.user_id.to_string(), time + 7 * 24 * 3_600, "Graynote_auth_service".into(), Uuid::new_v4(), user.user_role, time - 1, user.user_handle);
                 let token = TokenPieces::new(header, payload);
-                println!("Stored hash: {}", user.password_id);
-                println!("Incoming password: {:?}", basic_auth.password);
 
                 if !argon2::verify_encoded(user.password_id.as_str(), basic_auth.password.as_ref().ok_or(Error::InvalidCredentials)?.as_bytes())? {
                     error!("Could not verify hash");
