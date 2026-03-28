@@ -16,8 +16,7 @@ use sqlx::{
     Pool, Postgres, query
 };
 use subtle::ConstantTimeEq;
-use tracing::{error, warn};
-use tracing_log::log::info;
+use tracing::{error, warn, info};
 use uuid::Uuid;
 
 ///
@@ -44,6 +43,8 @@ impl Database for Pool<Postgres> {
         let salt = format!("{}{}", var("MASTER_KEY")?, Utc::now().timestamp());
         let config = Config::default();
         let hash = argon2::hash_encoded(user.password_id.as_bytes(), salt.as_bytes(), &config)?;
+        // error!("VERIFYING HASH AGAINST CREDS: {} FOR {} WITH HASH {}", user, user.user_handle, hash);
+        info!("IS VERIFIED: {:?}", argon2::verify_encoded(user.password_id.as_str(), hash.as_bytes()));
         let allowed_admins = var("DESIGNATED_ADMIN_USERS")?.to_lowercase();
         let allowed_admins: Vec<&str> = allowed_admins.split(",").collect();
         let allowed_roles = var("ALLOWED_ROLE_TYPES")?.to_lowercase();
@@ -80,7 +81,7 @@ impl Database for Pool<Postgres> {
             }
     }
 
-    async fn login_basic(&self, basic_auth: BasicAuth) -> Result<(String, Uuid), Error> {
+    async fn login_basic(&self, basic_auth: &BasicAuth) -> Result<(String, Uuid), Error> {
         let user: Option<UserInfo> = match sqlx::query_as(
             "SELECT *
                 FROM users
@@ -99,19 +100,24 @@ impl Database for Pool<Postgres> {
                 let header = Header::new("HS256".into(), TokenType::Jwt);
                 let payload = Payload::new(user.user_id.to_string(), time + 7 * 24 * 3_600, "Graynote_auth_service".into(), Uuid::new_v4(), user.user_role, time - 1, user.user_handle);
                 let token = TokenPieces::new(header, payload);
-                
-                if !argon2::verify_encoded(&user.password_id, basic_auth.password.ok_or(Error::InvalidCredentials)?.as_bytes())? {
+                println!("Stored hash: {}", user.password_id);
+                println!("Incoming password: {:?}", basic_auth.password);
+
+                if !argon2::verify_encoded(user.password_id.as_str(), basic_auth.password.as_ref().ok_or(Error::InvalidCredentials)?.as_bytes())? {
+                    error!("Could not verify hash");
+                    
                     return Err(Error::InvalidCredentials)
                 }
 
                 let token_string = token.build_jwt(&var("MASTER_KEY")?)?;
 
-                match self.login_user(token_string.clone()).await {
+                match self.login_user(&token_string).await {
                     Ok(session_id) => Ok((token_string, session_id)),
                     Err(error) => Err(error)
                 }
             },
             None => {
+                error!("No user found");
                 argon2::verify_encoded("$NULLHASHjnlnnkn$", b"DO NOT VERIFY.")?;
 
                 Err(Error::InvalidCredentials)
@@ -222,7 +228,7 @@ impl Database for Pool<Postgres> {
         }
     } 
 
-    async fn get_case_information(&self, case_details: CaseDetails) -> Result<CaseInformation, Error> {
+    async fn get_case_information(&self, case_details: &CaseDetails) -> Result<CaseInformation, Error> {
         let token = TokenPieces::try_from(case_details.token.as_str())?;
 
         if !self.is_access_granted(&case_details.session_id, &case_details.token,&Some(case_details.case_number), true).await?.0 {
@@ -258,7 +264,7 @@ impl Database for Pool<Postgres> {
         }
     }
 
-    async fn get_case_notes(&self, case_details: CaseDetails) -> Result<Vec<Notes>, Error> {
+    async fn get_case_notes(&self, case_details: &CaseDetails) -> Result<Vec<Notes>, Error> {
         let token = TokenPieces::try_from(case_details.token.as_str())?;
 
         if !self.is_access_granted(&case_details.session_id, &case_details.token,&Some(case_details.case_number), true).await?.0 {
@@ -288,7 +294,7 @@ impl Database for Pool<Postgres> {
             }
     }
 
-    async fn login_user(&self, token: String) -> Result<Uuid, Error> {
+    async fn login_user(&self, token: &String) -> Result<Uuid, Error> {
         let key_pieces = TokenPieces::try_from(token.as_str())?;
         let payload = key_pieces.get_payload();
         let Ok(user_id) = Uuid::try_parse(&payload.sub) else {

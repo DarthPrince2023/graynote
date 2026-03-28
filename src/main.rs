@@ -26,6 +26,6 @@ async fn main() {
         .route("/case/find/all", post(PostRoutes::find_accessible_cases))
         .route("/case/notes/find/all", post(PostRoutes::find_accessible_notes))
         .with_state(state);
-    let listener = TcpListener::bind("0.0.0.0:8080").await.unwrap();
+    let listener = TcpListener::bind("0.0.0.0:8080").await.expect("TcpListener");
     let _ = axum::serve(listener, router.into_make_service()).await;
 }

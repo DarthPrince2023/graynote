@@ -3,6 +3,17 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 
+///
+/// `'AdminUserInfoRequest'`
+/// 
+/// --- FIELDS ---
+/// `user_handle` = the username of the user to look up
+/// `admin_session_id` = a valid admin session ID
+/// `admin_token` = a valid admin session token
+/// 
+/// The purpose of this type is to allow an admin lookup request of a user
+/// by username
+/// 
 #[derive(Debug, Deserialize, Serialize, FromRow, Default)]
 pub struct AdminUserInfoRequest {
     pub user_handle: String,
@@ -10,13 +21,30 @@ pub struct AdminUserInfoRequest {
     pub admin_token: String,
 }
 
+///
+/// This object stores the information of a given user, everything necessary to identify a user across sessions.
+/// 
+/// Fields
+/// 
+/// `user_id`: The ID of the user in the database
+/// 
+/// `user_handle`: The identifying "username" of a given user
+/// 
+/// `password_id`: The password of a user. Skipped when retrieving user info for security.
+/// 
+/// `user_role`: What role this user is assigned when accessing information from the service: ['viewer', 'investigator', 'admin']
+/// 
+/// `created_at`: The Chrono `'Datetime'` UTC timestamp for when a user was originally created in the database. Used in creating tokens.
+///
 #[derive(Debug, Deserialize, Serialize, FromRow, Default)]
 pub struct UserInfo {
+    #[serde(skip_deserializing)]
     pub user_id: Uuid,
     pub user_handle: String,
-    #[serde(skip)]
+    #[serde(skip_serializing)]
     pub password_id: String,
     pub user_role: String,
+    #[serde(skip_deserializing)]
     pub created_at: DateTime<Utc>
 }
 
@@ -69,21 +97,7 @@ impl UserInfo {
     }
 }
 
-///
-/// This object stores the information of a given user, everything necessary to identify a user across sessions.
-/// 
-/// Fields
-/// 
-/// user_id: The ID of the user in the database
-/// 
-/// username: The name attached to the session
-/// 
-/// password: Shh, we don't talk about this.
-/// 
-/// active_tokens: A vector we check against our user token against, to maintain session tokens.
-/// 
-/// created_at: The Chrono Datetime UTC timestamp for when a user was originally created in the database. Used in creating tokens.
-///
+
 /// `'CaseInformation'` is a type that we can pull from the database regarding a case. 
 #[derive(Debug, Deserialize, Serialize, FromRow)]
 pub struct CaseInformation {

@@ -36,14 +36,14 @@ pub mod types;
 ///
 pub trait Database {
     fn user_exists(&self, username: &str) -> impl Future<Output = Result<bool, Error>> + Send;
-    fn get_case_information(&self, case_details: CaseDetails) -> impl Future<Output = Result<CaseInformation, Error>> + Send;
+    fn get_case_information(&self, case_details: &CaseDetails) -> impl Future<Output = Result<CaseInformation, Error>> + Send;
     fn admin_get_user_info(&self, user_info: AdminUserInfoRequest) -> impl Future<Output = Result<UserInfo, Error>> + Send;
-    fn get_case_notes(&self, case_details: CaseDetails) -> impl Future<Output = Result<Vec<Notes>, Error>> + Send;
-    fn login_basic(&self, basic_auth: BasicAuth) -> impl Future<Output = Result<(String, Uuid), Error>> + Send;
+    fn get_case_notes(&self, case_details: &CaseDetails) -> impl Future<Output = Result<Vec<Notes>, Error>> + Send;
+    fn login_basic(&self, basic_auth: &BasicAuth) -> impl Future<Output = Result<(String, Uuid), Error>> + Send;
     fn insert_user(&self, user: UserInfo) -> impl Future<Output = Result<(), Error>> + Send;
     fn insert_case_information(&self, case_access: CaseAccess) -> impl Future<Output = Result<Uuid, Error>> + Send;
     fn insert_note(&self, note: &Notes) -> impl Future<Output = Result<(), Error>> + Send;
-    fn login_user(&self, token: String) -> impl Future<Output = Result<Uuid, Error>> + Send;
+    fn login_user(&self, token: &String) -> impl Future<Output = Result<Uuid, Error>> + Send;
     fn add_uac_member(&self, case_number: Uuid, token: String, session_id: String, target_user: Uuid) -> impl Future<Output = Result<(), Error>> + Send;
     fn find_accessible_cases(&self, token: String, session_id: String) -> impl Future<Output = Result<Vec<CaseInformation>, Error>> + Send;
     fn find_accessible_notes(&self, session_id: String, token: String) -> impl Future<Output = Result<Vec<Notes>, Error>> + Send;

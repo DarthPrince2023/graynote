@@ -138,7 +138,7 @@ impl ClientBuilder {
         if let Some(auth) = &self.bearer_auth {
             request_client.bearer_auth(auth)
         } else if let Some(auth) = &self.basic_auth {
-            request_client.basic_auth(auth.username.to_string(), auth.password.clone())
+            request_client.basic_auth(&auth.username, auth.password.clone())
         } else {
             request_client
         }
