@@ -46,7 +46,7 @@ impl Database for Pool<Postgres> {
                 return Err(Error::InvalidCredentials);
         }
 
-        let salt = format!("{}{}", var("MASTER_KEY")?, Utc::now().timestamp());
+        let salt = format!("{}{}{}", var("MASTER_KEY")?, Utc::now().timestamp(), Uuid::new_v4());
         let config = Config::default();
         let hash = argon2::hash_encoded(user.password_id.as_bytes(), salt.as_bytes(), &config)?;
         let allowed_admins = var("DESIGNATED_ADMIN_USERS")?.to_lowercase();
