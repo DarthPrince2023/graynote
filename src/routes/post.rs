@@ -25,7 +25,7 @@ pub async fn create_user(State(state): State<SharedState>, Json(user): Json<User
         },
         Err(error) => {
             error!("Unable to create user");
-            
+
             (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": error}).to_string())
         }
     }
@@ -162,8 +162,8 @@ pub async fn add_uac_member(State(shared_state): State<SharedState>, Json(uac_ma
 
             (StatusCode::CREATED, json!({"message":"Added user access to case"}).to_string())
         },
-        Err(_) => {
-            error!("Could not grant access to resource at {}", Utc::now());
+        Err(error) => {
+            error!("Could not grant access to resource at {}; error occurred => {error:?}", Utc::now());
 
             (StatusCode::INTERNAL_SERVER_ERROR, json!({"message":"Could not grant access for user"}).to_string())
         }
