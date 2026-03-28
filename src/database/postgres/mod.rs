@@ -40,11 +40,15 @@ impl Database for Pool<Postgres> {
     }
     
     async fn insert_user(&self, user: UserInfo) -> Result<(), Error> {
+        if user.user_handle.is_empty() ||
+            user.password_id.is_empty() ||
+            user.user_role.is_empty() {
+                return Err(Error::InvalidCredentials);
+        }
+
         let salt = format!("{}{}", var("MASTER_KEY")?, Utc::now().timestamp());
         let config = Config::default();
         let hash = argon2::hash_encoded(user.password_id.as_bytes(), salt.as_bytes(), &config)?;
-        // error!("VERIFYING HASH AGAINST CREDS: {} FOR {} WITH HASH {}", user, user.user_handle, hash);
-        info!("IS VERIFIED: {:?}", argon2::verify_encoded(user.password_id.as_str(), hash.as_bytes()));
         let allowed_admins = var("DESIGNATED_ADMIN_USERS")?.to_lowercase();
         let allowed_admins: Vec<&str> = allowed_admins.split(",").collect();
         let allowed_roles = var("ALLOWED_ROLE_TYPES")?.to_lowercase();
