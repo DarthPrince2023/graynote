@@ -292,8 +292,8 @@ impl Database for Pool<Postgres> {
             }
     }
 
-    async fn login_user(&self, token: &String) -> Result<Uuid, Error> {
-        let key_pieces = TokenPieces::try_from(token.as_str())?;
+    async fn login_user(&self, token: &str) -> Result<Uuid, Error> {
+        let key_pieces = TokenPieces::try_from(token)?;
         let payload = key_pieces.get_payload();
         let Ok(user_id) = Uuid::try_parse(&payload.sub) else {
             return Err(Error::JwtError)
@@ -355,7 +355,7 @@ impl Database for Pool<Postgres> {
     }
 
     async fn find_accessible_cases(&self, token: String, session_id: String) -> Result<Vec<CaseInformation>, Error> {
-        let has_access = self.is_access_granted(&session_id, &token, &None, true).await;
+        let has_access: Result<(bool, TokenPieces), Error> = self.is_access_granted(&session_id, &token, &None, true).await;
 
         let Ok((true, pieces)) = has_access else {
             return Err(Error::Unauthorized)
@@ -439,7 +439,7 @@ impl Database for Pool<Postgres> {
         .map_err(Error::from)
     }
 
-    async fn delete_invalid_token(&self, session_id: &String) -> Result<bool, Error> {
+    async fn delete_invalid_token(&self, session_id: &str) -> Result<bool, Error> {
         match sqlx::query(
             r#"
                 DELETE
@@ -455,10 +455,10 @@ impl Database for Pool<Postgres> {
         }
     }
 
-    async fn is_access_granted(&self, session_id: &String, token: &String, case_number: &Option<Uuid>, create_post: bool) -> Result<(bool, TokenPieces), Error> {
+    async fn is_access_granted(&self, session_id: &str, token: &str, case_number: &Option<Uuid>, create_post: bool) -> Result<(bool, TokenPieces), Error> {
         info!("Checking if user is allowed to access requested resource...");
-        let pieces = TokenPieces::try_from(token.as_str())?
-            .verify_jwt(&var("MASTER_KEY")?, &token)?;
+        let pieces = TokenPieces::try_from(token)?
+            .verify_jwt(&var("MASTER_KEY")?, token)?;
         let payload = pieces.get_payload();
         let allowed_admins = var("DESIGNATED_ADMIN_USERS")?;
         let allowed_admins: Vec<&str> = allowed_admins.split(",").collect();
@@ -504,7 +504,7 @@ impl Database for Pool<Postgres> {
             "#
         )
             .bind(Uuid::parse_str(&payload.sub)?)
-            .bind(Uuid::parse_str(&session_id)?)
+            .bind(Uuid::parse_str(session_id)?)
             .bind(case_number)
             .fetch_optional(self)
             .await {

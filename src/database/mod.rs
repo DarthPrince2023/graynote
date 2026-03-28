@@ -43,10 +43,10 @@ pub trait Database {
     fn insert_user(&self, user: UserInfo) -> impl Future<Output = Result<(), Error>> + Send;
     fn insert_case_information(&self, case_access: CaseAccess) -> impl Future<Output = Result<Uuid, Error>> + Send;
     fn insert_note(&self, note: &Notes) -> impl Future<Output = Result<(), Error>> + Send;
-    fn login_user(&self, token: &String) -> impl Future<Output = Result<Uuid, Error>> + Send;
+    fn login_user(&self, token: &str) -> impl Future<Output = Result<Uuid, Error>> + Send;
     fn add_uac_member(&self, case_number: Uuid, token: String, session_id: String, target_user: Uuid) -> impl Future<Output = Result<(), Error>> + Send;
     fn find_accessible_cases(&self, token: String, session_id: String) -> impl Future<Output = Result<Vec<CaseInformation>, Error>> + Send;
     fn find_accessible_notes(&self, session_id: String, token: String) -> impl Future<Output = Result<Vec<Notes>, Error>> + Send;
-    fn is_access_granted(&self, session_id: &String, token: &String, case_number: &Option<Uuid>, create_post: bool) -> impl Future<Output = Result<(bool, TokenPieces), Error>> + Send;
-    fn delete_invalid_token(&self, token: &String) -> impl Future<Output = Result<bool, Error>> + Send;
+    fn is_access_granted(&self, session_id: &str, token: &str, case_number: &Option<Uuid>, create_post: bool) -> impl Future<Output = Result<(bool, TokenPieces), Error>> + Send;
+    fn delete_invalid_token(&self, token: &str) -> impl Future<Output = Result<bool, Error>> + Send;
 } 
