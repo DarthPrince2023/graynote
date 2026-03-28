@@ -12,12 +12,11 @@ pub struct AdminUserInfoRequest {
 
 #[derive(Debug, Deserialize, Serialize, FromRow, Default)]
 pub struct UserInfo {
-    #[serde(skip)]
     pub user_id: Uuid,
     pub user_handle: String,
+    #[serde(skip)]
     pub password_id: String,
     pub user_role: String,
-    #[serde(skip)]
     pub created_at: DateTime<Utc>
 }
 
