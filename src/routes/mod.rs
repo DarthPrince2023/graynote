@@ -92,7 +92,7 @@ pub enum Error {
     InvalidCredentials,
     UserExists,
     UuidError,
-    Unathorized,
+    Unauthorized,
     JsonParseError,
     Argon2Error(String)
 }
@@ -181,7 +181,7 @@ impl Display for Error {
             Self::InvalidCredentials => write!(f, "Could not login; invalid credentials provided."),
             Self::UserExists => write!(f, "Could not create user, username exists."),
             Self::UuidError => write!(f, "Could not parse UUID"),
-            Self::Unathorized => write!(f, "Unauthorized"),
+            Self::Unauthorized => write!(f, "Unauthorized"),
             Self::JsonParseError => write!(f, "Unable to parse JSON data"),
             Self::Argon2Error(error) => write!(f, "Could not perform cryptographic hash operation on data => {error}")
         }

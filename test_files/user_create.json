@@ -1,5 +1,5 @@
 {
-  "user_handle": "",
-  "password_id": "",
+  "user_handle": "test_user",
+  "password_id": "test_pass",
   "user_role": "investigator"
 }

@@ -44,17 +44,17 @@ impl Database for Pool<Postgres> {
         let salt = format!("{}{}", var("MASTER_KEY")?, Utc::now().timestamp());
         let config = Config::default();
         let hash = argon2::hash_encoded(user.password_id.as_bytes(), salt.as_bytes(), &config)?;
-        let allowed_admins = var("DESIGNATED_ADMIN_USERS")?;
+        let allowed_admins = var("DESIGNATED_ADMIN_USERS")?.to_lowercase();
         let allowed_admins: Vec<&str> = allowed_admins.split(",").collect();
-        let allowed_roles = var("ALLOWED_ROLE_TYPES")?;
+        let allowed_roles = var("ALLOWED_ROLE_TYPES")?.to_lowercase();
         let allowed_roles: Vec<&str> = allowed_roles.split(",").collect();
 
         if !allowed_roles.contains(&user.user_role.as_str()) {
-            return Err(Error::Unathorized);
+            return Err(Error::Unauthorized);
         }
-        if user.user_role == "admin" &&
-            !allowed_admins.contains(&user.user_handle.as_str()) {
-                return Err(Error::Unathorized);
+        if user.user_role.to_lowercase() == "admin" &&
+            !allowed_admins.contains(&user.user_handle.to_lowercase().as_str()) {
+                return Err(Error::Unauthorized);
             };
         if self.user_exists(&user.user_handle).await? {
             return Err(Error::UserExists);
@@ -97,7 +97,7 @@ impl Database for Pool<Postgres> {
             Some(user) => {
                 let time = Utc::now().timestamp();
                 let header = Header::new("HS256".into(), TokenType::Jwt);
-                let payload = Payload::new(user.user_id.to_string(), time + 7 * 24 * 3_600, "Graynote_auth_service".into(), Uuid::new_v4(), user.user_role, time - 1);
+                let payload = Payload::new(user.user_id.to_string(), time + 7 * 24 * 3_600, "Graynote_auth_service".into(), Uuid::new_v4(), user.user_role, time - 1, user.user_handle);
                 let token = TokenPieces::new(header, payload);
                 
                 if !argon2::verify_encoded(&user.password_id, basic_auth.password.ok_or(Error::InvalidCredentials)?.as_bytes())? {
@@ -123,7 +123,7 @@ impl Database for Pool<Postgres> {
         let token = TokenPieces::try_from(note.token.as_str())?;
 
         if !self.is_access_granted(&note.session_id, &note.token,&Some(note.case_number), true).await?.0 {
-            return Err(Error::Unathorized)
+            return Err(Error::Unauthorized)
         };
         match query(
             r#"
@@ -159,7 +159,7 @@ impl Database for Pool<Postgres> {
         let case_information = case_access.case_information;
 
         if !self.is_access_granted(&case_access.session_id, &case_access.token, &None, true).await?.0 {
-            return Err(Error::Unathorized)
+            return Err(Error::Unauthorized)
         };
         match query(
             r#"
@@ -226,7 +226,7 @@ impl Database for Pool<Postgres> {
         let token = TokenPieces::try_from(case_details.token.as_str())?;
 
         if !self.is_access_granted(&case_details.session_id, &case_details.token,&Some(case_details.case_number), true).await?.0 {
-            return Err(Error::Unathorized)
+            return Err(Error::Unauthorized)
         };
         match sqlx::query_as(
             r#"
@@ -262,7 +262,7 @@ impl Database for Pool<Postgres> {
         let token = TokenPieces::try_from(case_details.token.as_str())?;
 
         if !self.is_access_granted(&case_details.session_id, &case_details.token,&Some(case_details.case_number), true).await?.0 {
-            return Err(Error::Unathorized)
+            return Err(Error::Unauthorized)
         };
         match sqlx::query_as(
             r#"
@@ -327,7 +327,7 @@ impl Database for Pool<Postgres> {
         
         if !self.is_access_granted(&session_id, &token, &Some(case_number), true).await?.0 ||
             admin_token.get_payload().role != "admin" {
-            return Err(Error::Unathorized)
+            return Err(Error::Unauthorized)
         };
         sqlx::query(
             r#"
@@ -354,7 +354,7 @@ impl Database for Pool<Postgres> {
         let has_access = self.is_access_granted(&session_id, &token, &None, true).await;
 
         let Ok((true, pieces)) = has_access else {
-            return Err(Error::Unathorized)
+            return Err(Error::Unauthorized)
         };
         
         sqlx::query_as(
@@ -388,7 +388,7 @@ impl Database for Pool<Postgres> {
         
         if admin_token.1.get_payload().role != "admin" ||
             !admin_token.0 {
-            return Err(Error::Unathorized)
+            return Err(Error::Unauthorized)
         }
 
         match sqlx::query_as(
@@ -412,7 +412,7 @@ impl Database for Pool<Postgres> {
 
     async fn find_accessible_notes(&self, session_id: String, token: String) -> Result<Vec<Notes>, Error> {        
         let Ok((true, user)): Result<(bool, TokenPieces), Error> = self.is_access_granted(&session_id, &token, &None, true).await else {
-            return Err(Error::Unathorized)
+            return Err(Error::Unauthorized)
         };
 
         sqlx::query_as(
@@ -459,11 +459,11 @@ impl Database for Pool<Postgres> {
         let allowed_admins = var("DESIGNATED_ADMIN_USERS")?;
         let allowed_admins: Vec<&str> = allowed_admins.split(",").collect();
 
-        if !allowed_admins.contains(&payload.sub.as_str()) &&
+        if !allowed_admins.contains(&payload.username.as_str()) &&
             payload.role.contains("admin") {
                 error!("Unauthorized admin attempt at {} for user {}", Utc::now(), &payload.sub);
 
-                return Err(Error::Unathorized)
+                return Err(Error::Unauthorized)
         };
         
         // For all events that depend on the timestamp, we want to get the exact timestamp.
@@ -524,7 +524,7 @@ impl Database for Pool<Postgres> {
         if !bool::from(token_hash.as_bytes().ct_eq(bytes.as_bytes())) {
             warn!("Unauthorized token received");
 
-            return Err(Error::Unathorized)
+            return Err(Error::Unauthorized)
         }
 
         // Check if user is authorized to access the case
