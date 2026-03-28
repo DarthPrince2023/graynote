@@ -331,12 +331,12 @@ impl Database for Pool<Postgres> {
     async fn add_uac_member(
         &self, case_number: Uuid, token: String, session_id: String, target_user: Uuid
     ) -> Result<(), Error> {
-        let admin_token = TokenPieces::try_from(token.as_str())?;
-        
-        if !self.is_access_granted(&session_id, &token, &Some(case_number), true).await?.0 ||
-            admin_token.get_payload().role != "admin" {
+        let admin_token = self.is_access_granted(&session_id, &token, &Some(case_number), true).await?;
+        info!("USING THIS{admin_token:?}");
+        if admin_token.1.get_payload().role != "admin" ||
+            !admin_token.0 {
             return Err(Error::Unauthorized)
-        };
+        }
         sqlx::query(
             r#"
                 INSERT
@@ -466,7 +466,7 @@ impl Database for Pool<Postgres> {
         let payload = pieces.get_payload();
         let allowed_admins = var("DESIGNATED_ADMIN_USERS")?;
         let allowed_admins: Vec<&str> = allowed_admins.split(",").collect();
-
+        info!("pieces => {pieces:?}");
         if !allowed_admins.contains(&payload.username.as_str()) &&
             payload.role.contains("admin") {
                 error!("Unauthorized admin attempt at {} for user {}", Utc::now(), &payload.sub);

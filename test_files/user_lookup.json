@@ -1,5 +1,5 @@
 {
-  "user_handle": "",
-  "admin_session_id": "",
-  "admin_token": ""
+  "user_handle": "testing_1",
+  "admin_session_id": "6ec5c3c8-6d4f-41b4-89f3-5599303873dd",
+  "admin_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkYzJhYTYxOS02NjY1LTRlMDItYTIwNi04YzMxZjEzZTU1ZDkiLCJleHAiOjE3NzUzMjgxNjEsImlzcyI6IkdyYXlub3RlX2F1dGhfc2VydmljZSIsIm5iZiI6MTc3NDcyMzM2MCwianRpIjoiODE3OWQ3OGMtYzU1NC00NDcxLTgxNzItMmM4ZDIzZThlODE3Iiwicm9sZSI6ImFkbWluIiwiaXNfYWN0aXZlIjpmYWxzZSwidXNlcm5hbWUiOiJLYXlsYUJldmFuc0FkbWluIn0.TUxWdEzHDmKU88_o_UUu9cJkHME-6-14BJ2TdrqPMuM"
 }
