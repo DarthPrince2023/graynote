@@ -169,25 +169,34 @@ impl Database for Pool<Postgres> {
         if !self.is_access_granted(&case_access.session_id, &case_access.token, &None, true).await?.0 {
             return Err(Error::Unauthorized)
         };
-        match query(
+        match sqlx::query(
             r#"
-                INSERT
-                INTO cases (
-                    case_number,
+                WITH case_creation AS (
+                    INSERT
+                    INTO cases (
+                        case_number,
+                        user_id,
+                        suspect_name,
+                        suspect_aliases,
+                        suspect_description,
+                        suspect_phone,
+                        suspect_email,
+                        suspect_ip,
+                        victim_name,
+                        victim_email,
+                        victim_phone,
+                        timestamp_case
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7,
+                        $8, $9, $10, $11, $12
+                    )
+                )
+                INSERT INTO user_access_control (
+                    param_id,
                     user_id,
-                    suspect_name,
-                    suspect_aliases,
-                    suspect_description,
-                    suspect_phone,
-                    suspect_email,
-                    suspect_ip,
-                    victim_name,
-                    victim_email,
-                    victim_phone,
-                    timestamp_case
+                    case_number
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7,
-                    $8, $9, $10, $11, $12
+                    $13, $2, $1
                 );
             "#
         )
@@ -203,31 +212,12 @@ impl Database for Pool<Postgres> {
             .bind(case_information.victim_email)
             .bind(case_information.victim_phone)
             .bind(Utc::now())
+            .bind(Uuid::new_v4())
             .execute(self)
             .await {
-                Ok(_) => (),
-                Err(error) => return Err(Error::from(error))
+                Ok(_) => Ok(case_number),
+                Err(error) => Err(Error::from(error))
             }
-        match query(
-            r#"
-                INSERT
-                INTO user_access_control (
-                    param_id,
-                    user_id,
-                    case_number
-                ) VALUES (
-                    $1, $2, $3
-                );
-            "#
-        )
-        .bind(Uuid::new_v4())
-        .bind(case_information.user_id)
-        .bind(case_number)
-        .execute(self)
-        .await {
-            Ok(_) => Ok(case_number),
-            Err(error) => Err(Error::from(error))
-        }
     } 
 
     async fn get_case_information(&self, case_details: &CaseDetails) -> Result<CaseInformation, Error> {
