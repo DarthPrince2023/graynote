@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS notes (
     case_number UUID NOT NULL,
     author_id UUID,
     note_text TEXT NOT NULL,
-    relevant_media TEXT,
+    relevant_media TEXT [],
     entry_timestamp TIMESTAMPTZ DEFAULT now(),
     FOREIGN KEY (case_number) REFERENCES cases(case_number)
 );
