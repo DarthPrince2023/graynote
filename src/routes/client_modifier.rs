@@ -1,7 +1,9 @@
 use std::time::Duration;
 
+use chrono::Utc;
 use reqwest::{Client, RequestBuilder};
 use serde::Deserialize;
+use tracing::info;
 
 use crate::routes::Error;
 
@@ -29,18 +31,22 @@ pub struct BasicAuth {
 
 impl BasicAuth {
     pub fn new(username: String, password: Option<String>) -> Self {
+        info!("Attempting to create BasicAuth object at {}", Utc::now());
+
         Self {
             username, password
         }
     }
 
     pub fn set_username(&mut self, username: String) -> &mut Self {
+        info!("Setting username for BasicAuth at {}", Utc::now());
         self.username = username;
 
         self
     }
 
     pub fn set_password(&mut self, password: Option<String>) -> &mut Self {
+        info!("Setting password for BasicAuth at {}", Utc::now());
         self.password = password;
 
         self
@@ -69,6 +75,7 @@ pub struct ClientBuilder {
 /// 
 impl ClientBuilder {
     pub fn new(request_type: RequestType, url: String, content_type: Option<String>, body: Option<Vec<u8>>, basic_auth: Option<BasicAuth>, bearer_auth: Option<String>) -> Self {
+        info!("Creating new ClientBuilder at {}", Utc::now());
         let client = Client::new();
 
         Self {
@@ -84,48 +91,56 @@ impl ClientBuilder {
     }
     
     pub fn set_request_type(&mut self, request_type: RequestType) -> &mut Self {
+        info!("Setting request type for ClientBuilder at {}", Utc::now());
         self.request_type = request_type;
 
         self
     }
 
     pub fn set_url(&mut self, url: String) -> &mut Self {
+        info!("Setting URL for ClientBuilder at {}", Utc::now());
         self.url = url;
 
         self
     }
 
     pub fn set_content_type(&mut self, content_type: Option<String>) -> &mut Self {
+        info!("Setting content type for ClientBuilder at {}", Utc::now());
         self.content_type = content_type;
 
         self
     }
 
     pub fn set_body(&mut self, body: Option<Vec<u8>>) -> &mut Self {
+        info!("Setting body of request for ClientBuilder at {}", Utc::now());
         self.body = body;
 
         self
     }
 
     pub fn set_basic_auth(&mut self, basic_auth: Option<BasicAuth>) -> &mut Self {
+        info!("Setting basic authentication credentials for ClientBuilder at {}", Utc::now());
         self.basic_auth = basic_auth;
 
         self
     }
 
     pub fn set_bearer_auth(&mut self, bearer_auth: Option<String>) -> &mut Self {
+        info!("Setting bearer authentication token for ClientBuilder at {}", Utc::now());
         self.bearer_auth = bearer_auth;
 
         self
     }
 
     pub fn set_timeout(&mut self, seconds: u64) -> &mut Self {
+        info!("Setting response timeout for ClientBuilder at {}", Utc::now());
         self.timeout = seconds;
 
         self
     }
 
     pub fn get_client_with_auth(&mut self) -> RequestBuilder {
+        info!("Getting ClientBuilder with authentication for request type {:?} at {}", self.request_type, Utc::now());
         let request_client = match self.request_type {
             RequestType::Delete => self.client.delete(&self.url),
             RequestType::Get => self.client.get(&self.url),
@@ -148,8 +163,13 @@ impl ClientBuilder {
     /// Send the request, get the response bytes or `'Error'` on fail
     /// 
     pub async fn send_request(&mut self) -> Result<Vec<u8>, Error> {
+        info!("Getting client with authentication to send request at {}", Utc::now());
         let client = self.get_client_with_auth();
+
+        info!("Creating the content type header at {}", Utc::now());
         let content_type = self.content_type.clone().unwrap_or("application/json".into());
+
+        info!("Creating the body of the request at {}", Utc::now());
         let default_body = self.body.clone().unwrap_or_default();
         let response_bytes = client
             .header("Content-Type", content_type)

@@ -39,8 +39,6 @@ impl SharedState {
     /// instantiate a new shared state instance for our service
     /// 
     pub async fn new() -> Result<Self, Error> {
-        Self::init_tracing();
-
         // Attempt to get a postgres connection
         info!("Retrieving necessary environment variables");
         let url = &var("DATABASE_URL")?;

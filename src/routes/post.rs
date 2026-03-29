@@ -15,24 +15,26 @@ use crate::{
     }
 };
 
+#[tracing::instrument(skip(state, user), name = "CREATE USER")]
 pub async fn create_user(State(state): State<SharedState>, Json(user): Json<UserInfo>) -> impl IntoResponse {
-    info!("Attempting to creater user");
+    info!("Attempting to creater user at {}", Utc::now());
     match state.postgres_pool.insert_user(user).await {
         Ok(()) => {
-            info!("Created user successfully");
+            info!("Created user successfully at {}", Utc::now());
 
             (StatusCode::CREATED, json!({"message": "User added."}).to_string())
         },
         Err(error) => {
-            error!("Unable to create user");
+            error!("Unable to create user at {}", Utc::now());
 
             (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": error}).to_string())
         }
     }
 }
 
+#[tracing::instrument(skip(state, basic_auth), name = "BASIC AUTHENTICATION")]
 pub async fn basic_login(State(state): State<SharedState>, Json(basic_auth): Json<BasicAuth>) -> impl IntoResponse {
-    info!("Attempting login authorization");
+    info!("Attempting login authorization at {}", Utc::now());
     match state.postgres_pool.login_basic(&basic_auth).await {
         Ok(token) => {
             info!("User login request authorized at {} for user {}", Utc::now(), basic_auth.username);
@@ -47,8 +49,9 @@ pub async fn basic_login(State(state): State<SharedState>, Json(basic_auth): Jso
     }
 }
 
+#[tracing::instrument(skip(shared_state, case), name = "GET CASE INFORMATION")]
 pub async fn get_case_information(State(shared_state): State<SharedState>, Json(case): Json<CaseDetails>) -> impl IntoResponse {
-    info!("Attempting to retrieve information about case");
+    info!("Attempting to retrieve information about case at {}", Utc::now());
     let case_info = match shared_state.postgres_pool.get_case_information(&case).await {
         Ok(case_info) => {
             info!("Retrieved information for case {} at {} for {}", case.case_number, Utc::now(), case_info.user_id);
@@ -61,6 +64,8 @@ pub async fn get_case_information(State(shared_state): State<SharedState>, Json(
             return (StatusCode::UNAUTHORIZED,json!({"message":"You are not authorized to access the requested resource."}).to_string())
         }
     };
+
+    info!("Attempting to serialize retrieved case information at {} for case {}", Utc::now(), case_info.case_number);
     let Ok(case_info) = serde_json::to_string(&case_info) else {
         error!("Unable to serialize retrieved case data at {}", Utc::now());
 
@@ -70,8 +75,9 @@ pub async fn get_case_information(State(shared_state): State<SharedState>, Json(
     (StatusCode::OK, case_info)
 }
 
+#[tracing::instrument(skip(shared_state, case), name = "GET CASE NOTES")]
 pub async fn get_case_notes(State(shared_state): State<SharedState>, Json(case): Json<CaseDetails>) -> impl IntoResponse {
-    info!("Attempting to retrieve notes for case");
+    info!("Attempting to retrieve notes for case {} at {}", case.case_number, Utc::now());
     let case_notes = match shared_state.postgres_pool.get_case_notes(&case).await {
         Ok(case_notes) => {
             info!("Retrieved notes for case {} at {}", case.case_number, Utc::now());
@@ -79,13 +85,15 @@ pub async fn get_case_notes(State(shared_state): State<SharedState>, Json(case):
             case_notes
         },
         Err(_) => {
-            error!("Unable to retrieve notes for requested case at {}", Utc::now());
+            error!("Unable to retrieve notes for requested case {} at {}", case.case_number, Utc::now());
 
             return (StatusCode::UNAUTHORIZED, json!({"message": "You are not authorized to access the requested resource."}).to_string())
         }
     };
+
+    info!("Attempting to serialize notes retrieved for case {} at {}", case.case_number, Utc::now());
     let Ok(case_notes) = serde_json::to_string(&case_notes) else {
-        error!("Unable to serialize notes for case at {}", Utc::now());
+        error!("Unable to serialize notes for case {} at {}", case.case_number, Utc::now());
 
         return (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "Could not build response message."}).to_string())
     };
@@ -93,6 +101,7 @@ pub async fn get_case_notes(State(shared_state): State<SharedState>, Json(case):
     (StatusCode::OK, case_notes)
 }
 
+#[tracing::instrument(skip(shared_state, token), name = "FIND ACCESSIBLE CASES")]
 pub async fn find_accessible_cases(State(shared_state): State<SharedState>, Json(token): Json<AuthToken>) -> impl IntoResponse {
     info!("Retrieving accessible cases for given user");
     let cases = match shared_state.postgres_pool.find_accessible_cases(token.token, token.session_id).await {
@@ -115,8 +124,9 @@ pub async fn find_accessible_cases(State(shared_state): State<SharedState>, Json
     (StatusCode::OK, cases)
 }
 
+#[tracing::instrument(skip(shared_state, token), name = "GET ACCESSIBLE NOTES")]
 pub async fn find_accessible_notes(State(shared_state): State<SharedState>, Json(token): Json<AuthToken>) -> impl IntoResponse {
-    info!("Retrieving accessible notes for given user");
+    info!("Retrieving accessible notes for given user at {}", Utc::now());
     let notes = match shared_state.postgres_pool.find_accessible_notes(token.session_id, token.token).await {
         Ok(notes) => {
             info!("Retrieved notes for given user at {}", Utc::now());
@@ -129,8 +139,10 @@ pub async fn find_accessible_notes(State(shared_state): State<SharedState>, Json
             return (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "Could not fetch notes for user"}).to_string())
         }
     };
+
+    info!("Attempting to serialize retrieved notes at {}", Utc::now());
     let Ok(notes_string) = serde_json::to_string(&notes) else {
-        error!("Unable to serialize retrieved notes.");
+        error!("Unable to serialize retrieved notes at {}", Utc::now());
 
         return (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "No accessible notes found for provided user"}).to_string())
     };
@@ -138,24 +150,26 @@ pub async fn find_accessible_notes(State(shared_state): State<SharedState>, Json
     (StatusCode::OK, notes_string)
 }
 
+#[tracing::instrument(skip(shared_state, admin_request), name = "GET USER INFORMATION")]
 pub async fn fetch_user_info_admin(State(shared_state): State<SharedState>, Json(admin_request): Json<AdminUserInfoRequest>) -> impl IntoResponse {
-    info!("Attempting to retrieve user information for admin");
+    info!("Attempting to retrieve user information at {}", Utc::now());
     match shared_state.postgres_pool.admin_get_user_info(admin_request).await {
         Ok(user) => {
-            info!("Retrieved user info at {}", Utc::now());
+            info!("Successfully retrieved user info at {}", Utc::now());
 
             (StatusCode::OK, json!({"message": "Retrieval success", "user": user}).to_string())
         },
         Err(error_message) => {
-            error!("Could not fetch user information => {error_message}");
+            error!("Could not fetch user information => {error_message} at {}", Utc::now());
 
             (StatusCode::UNAUTHORIZED, json!({"message": "Could not look up user information"}).to_string())
         }
     }
 }
 
+#[tracing::instrument(skip(shared_state, uac_management), name = "ADD MEMBER USER ACCESS CONTROL")]
 pub async fn add_uac_member(State(shared_state): State<SharedState>, Json(uac_management): Json<UserAccessManagement>) -> impl IntoResponse {
-    info!("Adding access for case to user");
+    info!("Adding access for case {} to user at {}", uac_management.case_number, Utc::now());
     match shared_state.postgres_pool.add_uac_member(uac_management.case_number, uac_management.token, uac_management.session_id, uac_management.target_user).await {
         Ok(()) => {
             info!("Granted access for user {} at {}", uac_management.target_user, Utc::now());
@@ -170,6 +184,7 @@ pub async fn add_uac_member(State(shared_state): State<SharedState>, Json(uac_ma
     }
 }
 
+#[tracing::instrument(skip(shared_state, note), name = "ADD NOTE TO CASE")]
 pub async fn insert_note(State(shared_state): State<SharedState>, Json(note): Json<Notes>) -> impl IntoResponse {
     info!("Adding note to case...");
     match shared_state.postgres_pool.insert_note(&note).await {
@@ -179,23 +194,24 @@ pub async fn insert_note(State(shared_state): State<SharedState>, Json(note): Js
             (StatusCode::CREATED,json!({"message": "Added note to case"}).to_string())
         },
         Err(error_message) => {
-            error!("Attempted note insertion at {}, error => {error_message}", Utc::now());
+            error!("Attempted note insertion at {}; error occurred => {error_message}", Utc::now());
 
             (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "Unable to create note for case due to error"}).to_string())
         }
     }
 }
 
+#[tracing::instrument(skip(shared_state, case), name = "FILE NEW CASE")]
 pub async fn new_case(State(shared_state): State<SharedState>, Json(case): Json<CaseAccess>) -> impl IntoResponse {
     info!("Attempting to create new case");
     match shared_state.postgres_pool.insert_case_information(case).await  {
         Ok(case_number) => {
-            info!("Case creation authorized at {}", Utc::now());
+            info!("Case creation authorized at {} for case {case_number}", Utc::now());
 
             (StatusCode::CREATED, json!({ "message": "Case created", "case_number": case_number }).to_string())
         },
         Err(error) => {
-            error!("Unauthorized case creation attempt at {}", Utc::now());
+            error!("Unauthorized case creation attempt at {}; error occurred => {error}", Utc::now());
 
             (StatusCode::INTERNAL_SERVER_ERROR, json!({ "message": "Error filing case", "error": error.to_string() }).to_string())
         },

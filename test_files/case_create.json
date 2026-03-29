@@ -9,6 +9,6 @@
   		"suspect_ip": "192.168.1.87",
   		"victim_name": "Acme Publishing LLC"
 	},
-    "token": "",
-	"session_id": ""
+	"session_id": "",
+    "token": ""
 }
