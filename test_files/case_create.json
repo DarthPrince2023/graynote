@@ -1,13 +1,13 @@
 {
 	"case_information": {
   		"user_id": "", 
-  		"suspect_name": "Jane Smith",
-  		"suspect_aliases": ["NightFox", "JS"],
-  		"suspect_description": "Approx 5ft 7in, black jacket, frequently uses VPN services.",
-  		"suspect_phone": "555-0234",
-  		"suspect_email": "jane.smith@example.com",
-  		"suspect_ip": "192.168.1.87",
-  		"victim_name": "Acme Publishing LLC"
+  		"suspect_name": "",
+  		"suspect_aliases": ["alias"],
+  		"suspect_description": "",
+  		"suspect_phone": "",
+  		"suspect_email": "",
+  		"suspect_ip": "",
+  		"victim_name": ""
 	},
 	"session_id": "",
     "token": ""

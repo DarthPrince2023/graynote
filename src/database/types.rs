@@ -179,17 +179,30 @@ pub struct CaseDefinition {
 ///
 /// The `'Notes'` type is used for getting notes relevant to a case and/or it's relevant evidence
 ///
-#[derive(Debug, Deserialize, FromRow, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Notes {
-    #[serde(skip)]
+    #[serde(skip_deserializing)]
     pub note_id: Uuid,
     pub case_number: Uuid,
+    #[serde(skip)]
     pub user_id: Option<Uuid>,
     pub note_text: String,
     pub relevant_media: Vec<String>,
+    #[serde(skip_serializing)]
     pub token: String,
+    #[serde(skip_serializing)]
     pub session_id: String,
-    #[serde(skip)]
+    #[serde(skip_deserializing)]
+    pub entry_timestamp: Option<DateTime<Utc>>
+}
+
+#[derive(Debug, Deserialize, FromRow, Serialize)]
+pub struct NoteDetails {
+    pub case_number: Uuid,
+    pub author_id: Option<Uuid>,
+    pub note_text: String,
+    pub relevant_media: Vec<String>,
+    #[serde(skip_deserializing)]
     pub entry_timestamp: Option<DateTime<Utc>>
 }
 

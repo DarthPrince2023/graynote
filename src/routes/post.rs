@@ -78,27 +78,24 @@ pub async fn get_case_information(State(shared_state): State<SharedState>, Json(
 #[tracing::instrument(skip(shared_state, case), name = "GET CASE NOTES")]
 pub async fn get_case_notes(State(shared_state): State<SharedState>, Json(case): Json<CaseDetails>) -> impl IntoResponse {
     info!("Attempting to retrieve notes for case {} at {}", case.case_number, Utc::now());
-    let case_notes = match shared_state.postgres_pool.get_case_notes(&case).await {
+    match shared_state.postgres_pool.get_case_notes(&case).await {
         Ok(case_notes) => {
             info!("Retrieved notes for case {} at {}", case.case_number, Utc::now());
 
-            case_notes
+            return (
+                StatusCode::OK,
+                json!({"message": "Retrieved notes", "notes": case_notes}).to_string()
+            )
         },
         Err(_) => {
             error!("Unable to retrieve notes for requested case {} at {}", case.case_number, Utc::now());
 
-            return (StatusCode::UNAUTHORIZED, json!({"message": "You are not authorized to access the requested resource."}).to_string())
+            return (
+                StatusCode::UNAUTHORIZED,
+                json!({"message": "You are not authorized to access the requested resource."}).to_string()
+            )
         }
-    };
-
-    info!("Attempting to serialize notes retrieved for case {} at {}", case.case_number, Utc::now());
-    let Ok(case_notes) = serde_json::to_string(&case_notes) else {
-        error!("Unable to serialize notes for case {} at {}", case.case_number, Utc::now());
-
-        return (StatusCode::INTERNAL_SERVER_ERROR, json!({"message": "Could not build response message."}).to_string())
-    };
-
-    (StatusCode::OK, case_notes)
+    }
 }
 
 #[tracing::instrument(skip(shared_state, token), name = "FIND ACCESSIBLE CASES")]

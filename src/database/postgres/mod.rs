@@ -3,7 +3,7 @@ use std::env::var;
 use crate::{
     database::{
         Database, types::{
-            AdminUserInfoRequest, CaseAccess, CaseDetails, CaseInformation, Notes, UserInfo
+            AdminUserInfoRequest, CaseAccess, CaseDetails, CaseInformation, NoteDetails, Notes, UserInfo
         }
     },
     routes::{Error, client_modifier::BasicAuth}
@@ -16,7 +16,7 @@ use sqlx::{
     Pool, Postgres, query
 };
 use subtle::ConstantTimeEq;
-use tracing::{error, warn, info};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 ///
@@ -197,7 +197,7 @@ impl Database for Pool<Postgres> {
                 "#
         )
             .bind(Uuid::new_v4())
-            .bind(token.get_payload().sub)
+            .bind(Uuid::parse_str(token.get_payload().sub.as_str())?)
             .bind(note.note_text.as_str())
             .bind(&note.relevant_media)
             .bind(note.entry_timestamp)
@@ -336,7 +336,7 @@ impl Database for Pool<Postgres> {
         }
     }
 
-    async fn get_case_notes(&self, case_details: &CaseDetails) -> Result<Vec<Notes>, Error> {
+    async fn get_case_notes(&self, case_details: &CaseDetails) -> Result<Vec<NoteDetails>, Error> {
         let token = TokenPieces::try_from(case_details.token.as_str())?;
 
         info!("Verifying is user is authorized to access requested resource at {}", Utc::now());
@@ -345,22 +345,29 @@ impl Database for Pool<Postgres> {
 
             return Err(Error::Unauthorized)
         };
-        match sqlx::query_as(
+        // println
+    //     note_id UUID PRIMARY KEY, - yes
+    // case_number UUID NOT NULL, - yes
+    // author_id UUID, - yes
+    // note_text TEXT NOT NULL, - yes
+    // relevant_media TEXT [], - yes
+    // entry_timestamp TIMESTAMPTZ DEFAULT now() - yes
+    match sqlx::query_as(
             r#"
                 SELECT n.note_id,
+                    n.case_number,
                     n.author_id,
                     n.note_text,
                     n.relevant_media,
-                    n.entry_timestamp,
-                    n.case_number
+                    n.entry_timestamp
                 FROM notes n
                 JOIN user_access_control uac
-                    ON uac.case_number = n.case_number
+                ON uac.case_number = n.case_number
                 WHERE uac.user_id = $1::uuid
-                    AND n.case_number = $2::uuid;
+                AND n.case_number = $2::uuid;
             "#
         )
-            .bind(token.get_payload().sub)
+            .bind(token.get_payload().sub.as_str())
             .bind(case_details.case_number)
             .fetch_all(self)
             .await {
@@ -521,7 +528,7 @@ impl Database for Pool<Postgres> {
             }
     }
 
-    async fn find_accessible_notes(&self, session_id: String, token: String) -> Result<Vec<Notes>, Error> {        
+    async fn find_accessible_notes(&self, session_id: String, token: String) -> Result<Vec<NoteDetails>, Error> {        
         info!("Verifying authorization for access at {}", Utc::now());
         let Ok((true, user)): Result<(bool, TokenPieces), Error> = self.is_access_granted(&session_id, &token, &None, true).await else {
             error!("Unauthorized attempt at retrieving notes at {}", Utc::now());

@@ -2,9 +2,9 @@
 
 ## Gray Note is a secure authentication first based case access management digital locker ##
 
-
 # DESCRIPTION, ENDPOINTS, VERB, EXPECTED PAYLOAD #
-    Create a user
+
+Create a user
     `/add_user`
     POST
     {
@@ -13,7 +13,7 @@
         user_role: String, - Roles defined in environment variable `ALLOWED_ROLE_TYPES`.
     }
 
-    Authenticate a user
+Authenticate a user
     `/login`
     POST
     {
