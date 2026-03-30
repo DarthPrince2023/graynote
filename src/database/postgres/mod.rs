@@ -19,6 +19,8 @@ use subtle::ConstantTimeEq;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+const WEEKTIME_CALCULATION: i64 = 7 * 24 * 3_600;
+
 ///
 /// `'Postgres'` DB implementation of the `'Database'` trait
 /// 
@@ -388,7 +390,7 @@ impl Database for Pool<Postgres> {
 
             return Err(Error::JwtError)
         };
-        let expires_at = DateTime::from_timestamp_secs(Utc::now().timestamp() + 7 * 24 * 3600);
+        let expires_at = DateTime::from_timestamp_secs(Utc::now().timestamp() + WEEKTIME_CALCULATION);
         let session_id = Uuid::new_v4();
 
         info!("Login successful, creating session at {}", Utc::now());
