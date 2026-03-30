@@ -2,7 +2,7 @@
 	"case_information": {
   		"user_id": "", 
   		"suspect_name": "",
-  		"suspect_aliases": ["alias"],
+  		"suspect_aliases": ["aliases"],
   		"suspect_description": "",
   		"suspect_phone": "",
   		"suspect_email": "",

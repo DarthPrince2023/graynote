@@ -183,20 +183,14 @@ pub struct CaseDefinition {
 pub struct Notes {
     #[serde(skip_deserializing)]
     pub note_id: Uuid,
-    pub case_number: Uuid,
-    #[serde(skip)]
-    pub user_id: Option<Uuid>,
-    pub note_text: String,
-    pub relevant_media: Vec<String>,
+    pub note_details: NoteDetails,
     #[serde(skip_serializing)]
     pub token: String,
     #[serde(skip_serializing)]
     pub session_id: String,
-    #[serde(skip_deserializing)]
-    pub entry_timestamp: Option<DateTime<Utc>>
 }
 
-#[derive(Debug, Deserialize, FromRow, Serialize)]
+#[derive(Debug, Deserialize, FromRow, Serialize, Default)]
 pub struct NoteDetails {
     pub case_number: Uuid,
     pub author_id: Option<Uuid>,
@@ -210,13 +204,9 @@ impl Default for Notes {
     fn default() -> Self {
         Self {
             note_id: Uuid::default(),
-            case_number: Uuid::default(),
-            user_id: None,
-            note_text: String::new(),
-            relevant_media: Vec::new(),
+            note_details: NoteDetails::default(),
             token: String::new(),
             session_id: String::new(),
-            entry_timestamp: Some(DateTime::<Utc>::default())
         }
     }
 }

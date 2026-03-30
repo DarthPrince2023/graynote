@@ -175,9 +175,10 @@ impl Database for Pool<Postgres> {
     async fn insert_note(&self, note: &Notes) -> Result<(), Error> {
         info!("Validating received token at {}", Utc::now());
         let token = TokenPieces::try_from(note.token.as_str())?;
+        let note_details = &note.note_details;
 
         info!("Checking if user is authorized to insert note at {}", Utc::now());
-        if !self.is_access_granted(&note.session_id, &note.token,&Some(note.case_number), true).await?.0 {
+        if !self.is_access_granted(&note.session_id, &note.token,&Some(note_details.case_number), true).await?.0 {
             error!("Unauthorized note creation attempt at {}", Utc::now());
 
             return Err(Error::Unauthorized)
@@ -200,10 +201,10 @@ impl Database for Pool<Postgres> {
         )
             .bind(Uuid::new_v4())
             .bind(Uuid::parse_str(token.get_payload().sub.as_str())?)
-            .bind(note.note_text.as_str())
-            .bind(&note.relevant_media)
-            .bind(note.entry_timestamp)
-            .bind(note.case_number)
+            .bind(note_details.note_text.as_str())
+            .bind(&note_details.relevant_media)
+            .bind(note_details.entry_timestamp)
+            .bind(note_details.case_number)
             .execute(self)
             .await {
                 Ok(_) => {

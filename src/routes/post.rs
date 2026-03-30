@@ -186,7 +186,7 @@ pub async fn insert_note(State(shared_state): State<SharedState>, Json(note): Js
     info!("Adding note to case...");
     match shared_state.postgres_pool.insert_note(&note).await {
         Ok(()) => {
-            info!("Note added to case by {} at {}.", note.user_id.expect("User ID"), Utc::now());
+            info!("Note added to case by {} at {}.", note.note_details.author_id.expect("Author ID"), Utc::now());
 
             (StatusCode::CREATED,json!({"message": "Added note to case"}).to_string())
         },
