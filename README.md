@@ -2,6 +2,16 @@
 
 ## Gray Note is a secure authentication first based case access management digital locker ##
 
+## Basic Operation of GrayNote ##
+    - To allow a user to be added as an administrator,
+add the username to the DESIGNATED_ADMIN_USERS environment variable,
+with a comma following it.
+    
+    - SSL certificates are pulled in from /path/to/graynote/ssl_certificates
+to generate the demo certificates, you will need JUST. Just can be installed with
+cargo install just. There is a just recipe for generating the demo dummy certs 
+`just create_certificates` will automatically create them.
+
 # DESCRIPTION, ENDPOINTS, VERB, EXPECTED PAYLOAD #
 
 Create a user
