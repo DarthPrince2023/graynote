@@ -16,7 +16,7 @@ use sqlx::{
     Pool, Postgres, query
 };
 use subtle::ConstantTimeEq;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 ///
@@ -345,13 +345,6 @@ impl Database for Pool<Postgres> {
 
             return Err(Error::Unauthorized)
         };
-        // println
-    //     note_id UUID PRIMARY KEY, - yes
-    // case_number UUID NOT NULL, - yes
-    // author_id UUID, - yes
-    // note_text TEXT NOT NULL, - yes
-    // relevant_media TEXT [], - yes
-    // entry_timestamp TIMESTAMPTZ DEFAULT now() - yes
     match sqlx::query_as(
             r#"
                 SELECT n.note_id,
