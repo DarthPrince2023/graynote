@@ -1,7 +1,8 @@
 extern crate argon2;
+use std::net::SocketAddr;
+
 use axum::{Router, routing::post};
 use chrono::Utc;
-use tokio::net::TcpListener;
 use tracing::info;
 
 use crate::routes::{SharedState, post as PostRoutes};
@@ -14,7 +15,7 @@ async fn main() {
     // Get a new shared state instance, or return error on failure
     SharedState::init_tracing();
     info!("Tracing initialized; constructing SharedState at {}", Utc::now());
-    let state = match SharedState::new().await {
+    let (state, rustls_config) = match SharedState::new().await {
         Ok(state) => state,
         Err(error) => panic!("Could not create shared state => {error:?}")
     };
@@ -34,8 +35,10 @@ async fn main() {
         .with_state(state);
 
     info!("Attempting to create TCP listener at {}", Utc::now());
-    let listener = TcpListener::bind("0.0.0.0:8080").await.expect("TcpListener");
+    let listener = SocketAddr::from(([0, 0, 0, 0], 8443));
 
     info!("Serving listener at {}", Utc::now());
-    let _ = axum::serve(listener, router.into_make_service()).await;
+    let _ = axum_server::bind_rustls(listener, rustls_config)
+        .serve(router.into_make_service())
+        .await;
 }

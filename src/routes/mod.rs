@@ -1,3 +1,4 @@
+use axum_server::tls_rustls::RustlsConfig;
 use dotenvy::Error as DotEnvError;
 use jwt::errors::Error as JwtError;
 use argon2::Error as Argon2Error;
@@ -10,6 +11,7 @@ use sqlx::{
     Postgres, Pool, Error as SqlxError,
     postgres::PgPoolOptions
 };
+use std::io::Error as IoError;
 use tracing_log::log::info;
 use tracing_subscriber::{EnvFilter, fmt};
 use std::{
@@ -38,12 +40,19 @@ impl SharedState {
     ///
     /// instantiate a new shared state instance for our service
     /// 
-    pub async fn new() -> Result<Self, Error> {
+    pub async fn new() -> Result<(Self, RustlsConfig), Error> {
         // Attempt to get a postgres connection
         info!("Retrieving necessary environment variables");
         let url = &var("DATABASE_URL")?;
         let key = var("MASTER_KEY")?;
         let use_https_strict_rule: bool = var("RESTRICT_HTTPS_ONLY")?.parse()?;
+
+        info!("Trying to create Rustls Configuration using provided certificates");
+        let rustls_config = RustlsConfig::from_pem_file(
+            "/ssl_certificates/graynote_cert.pem",
+            "/ssl_certificates/graynote_key.pem"
+        )
+        .await?;
         
         info!("Trying to connect to Database");
         let postgres_pool = PgPoolOptions::new()
@@ -59,11 +68,11 @@ impl SharedState {
             .build()?;
 
         Ok(
-            Self {
+            (Self {
                 postgres_pool,
                 client,
                 key
-            }
+            }, rustls_config)
         )
     }
 
@@ -92,7 +101,14 @@ pub enum Error {
     UuidError,
     Unauthorized,
     JsonParseError,
-    Argon2Error(String)
+    Argon2Error(String),
+    IoError
+}
+
+impl From<IoError> for Error {
+    fn from(_: IoError) -> Self {
+        Self::IoError
+    }
 }
 
 impl From<Argon2Error> for Error {
@@ -181,7 +197,8 @@ impl Display for Error {
             Self::UuidError => write!(f, "Could not parse UUID"),
             Self::Unauthorized => write!(f, "Unauthorized"),
             Self::JsonParseError => write!(f, "Unable to parse JSON data"),
-            Self::Argon2Error(error) => write!(f, "Could not perform cryptographic hash operation on data => {error}")
+            Self::Argon2Error(error) => write!(f, "Could not perform cryptographic hash operation on data => {error}"),
+            Self::IoError => write!(f, "I/O error occurred")
         }
     }
 }

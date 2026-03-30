@@ -6,9 +6,11 @@ services:
     build:
       dockerfile: ./Dockerfile
     ports:
-      - "8080:8080"
+      - "8443:8443"
     env_file:
       - .env
+    volumes:
+      - ./ssl_certificates:/ssl_certificates:ro
   locker-db:
     image: postgres:latest
     ports:

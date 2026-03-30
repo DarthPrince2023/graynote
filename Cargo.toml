@@ -6,7 +6,7 @@ authors = ["Joshua Prince"]
 
 [dependencies]
 axum = { version = "0.8.8", features = ["http2", "ws"] }
-axum-server = "0.8.0"
+axum-server = { version = "0.8.0", features = ["rustls", "tls-rustls"] }
 chrono = { version = "0.4.44", features = ["serde"] }
 dioxus = "0.7.3"
 dotenvy = "0.15.7"
