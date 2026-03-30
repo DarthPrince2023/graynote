@@ -203,7 +203,7 @@ impl Database for Pool<Postgres> {
             .bind(Uuid::parse_str(token.get_payload().sub.as_str())?)
             .bind(note_details.note_text.as_str())
             .bind(&note_details.relevant_media)
-            .bind(note_details.entry_timestamp)
+            .bind(note_details.entry_timestamp.unwrap_or(Utc::now()))
             .bind(note_details.case_number)
             .execute(self)
             .await {
@@ -360,7 +360,9 @@ impl Database for Pool<Postgres> {
                 JOIN user_access_control uac
                 ON uac.case_number = n.case_number
                 WHERE uac.user_id = $1::uuid
-                AND n.case_number = $2::uuid;
+                AND n.case_number = $2::uuid
+                ORDER BY n.entry_timestamp
+                DESC;
             "#
         )
             .bind(token.get_payload().sub.as_str())

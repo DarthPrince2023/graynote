@@ -82,13 +82,16 @@ Authenticate a user
     `/case/notes/add`
     POST
     {
+        note_details: NoteDetails (Described below)
+        token: String - Authorization session token for investigator with access or admin.
+        session_id: Uuid - Authorization session identifier for investigator with access or admin.
+    }
+
+    `NoteDetails`:
         case_number: Uuid - Case number for which case this note is relevant.
         user_id: Optional Uuid - you are not required to include this in your payload.
         note_text: String - Textual description for note.
         relevant_media: array of strings - Relevant media source for note.
-        token: String - Authorization session token for investigator with access or admin.
-        session_id: Uuid - Authorization session identifier for investigator with access or admin.
-    }
 
     Find all accessible cases for a user
     `/case/find/all`
