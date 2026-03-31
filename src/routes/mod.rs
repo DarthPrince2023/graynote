@@ -1,29 +1,13 @@
 use axum_server::tls_rustls::RustlsConfig;
-use dotenvy::Error as DotEnvError;
-use jwt::errors::Error as JwtError;
-use argon2::Error as Argon2Error;
-use reqwest::{
-    Client, Error as ClientError
-};
-use serde::{Deserialize, Serialize};
-use serde_json::Error as JsonError;
+use reqwest::Client;
 use sqlx::{
-    Postgres, Pool, Error as SqlxError,
-    postgres::PgPoolOptions
+    Postgres, Pool, postgres::PgPoolOptions
 };
-use std::io::Error as IoError;
 use tracing_log::log::info;
 use tracing_subscriber::{EnvFilter, fmt};
-use std::{
-    env::{
-        VarError, var
-    },
-    fmt::Display,
-    str::ParseBoolError
-};
-use uuid::Error as UuidError;
+use std::env::var;
+use graynote_lib::types::error::Error;
 
-pub mod client_modifier;
 pub mod post;
 
 ///
@@ -82,123 +66,5 @@ impl SharedState {
         fmt()
             .with_env_filter(tracing_filter)
             .init();
-    }
-}
-
-///
-/// Declare custom `'Error'` enum type for handling errors in the codebase
-/// 
-#[derive(Debug, Deserialize, Serialize)]
-pub enum Error {
-    EnvError,
-    DatabaseError,
-    UserNotFound,
-    ClientError,
-    BooleanParseError,
-    JwtError,
-    InvalidCredentials,
-    UserExists,
-    UuidError,
-    Unauthorized,
-    JsonParseError,
-    Argon2Error(String),
-    IoError
-}
-
-impl From<IoError> for Error {
-    fn from(_: IoError) -> Self {
-        Self::IoError
-    }
-}
-
-impl From<Argon2Error> for Error {
-    fn from(value: Argon2Error) -> Self {
-        Self::Argon2Error(value.to_string())
-    }
-}
-
-impl From<JsonError> for Error {
-    fn from(_: JsonError) -> Self {
-        Self::JsonParseError
-    }
-}
-
-impl From<UuidError> for Error {
-    fn from(_: UuidError) -> Self {
-        Self::UuidError
-    }
-}
-
-///
-/// Convert from `'JwtError'` to Error
-///
-impl From<JwtError> for Error {
-    fn from(_: JwtError) -> Self {
-        Self::JwtError
-    }
-}
-
-///
-/// Convert from `'ParseErrorBool'` for our custom `'Error'` type
-/// 
-impl From<ParseBoolError> for Error {
-    fn from(_: ParseBoolError) -> Self {
-        Self::BooleanParseError
-    }
-}
-
-///
-/// Convert from `'ClientError'` for our custom `'Error'` type
-/// 
-impl From<ClientError> for Error {
-    fn from(_: ClientError) -> Self {
-        Self::ClientError
-    }
-}
-
-///
-/// Convert from `'DotEnvError'` for our custom `'Error'` type
-/// 
-impl From<DotEnvError> for Error {
-    fn from(_: DotEnvError) -> Self {
-        Self::EnvError
-    }
-}
-
-///
-/// Convert from `'VarError'` for our custom `'Error'` type
-/// 
-impl From<VarError> for Error {
-    fn from(_: VarError) -> Self {
-        Self::EnvError
-    }
-}
-
-///
-/// Convert from `'SqlxError'` for our custom `'Error'` type
-///
-impl From<SqlxError> for Error {
-    fn from(_: SqlxError) -> Self {
-        Self::DatabaseError
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::BooleanParseError => write!(f, "Could not parse boolean value"),
-            Self::EnvError => write!(f, "Environment error"),
-            Self::ClientError => write!(f, "Client error"),
-            Self::UserNotFound => write!(f, "User identified by information could not be verified."),
-            Self::DatabaseError => write!(f, "Database error has occurred"),
-            Self::JwtError => write!(f, "Token could not be verified."),
-            Self::InvalidCredentials => write!(f, "Could not login; invalid credentials provided."),
-            Self::UserExists => write!(f, "Could not create user, username exists."),
-            Self::UuidError => write!(f, "Could not parse UUID"),
-            Self::Unauthorized => write!(f, "Unauthorized"),
-            Self::JsonParseError => write!(f, "Unable to parse JSON data"),
-            Self::Argon2Error(error) => write!(f, "Could not perform cryptographic hash operation on data => {error}"),
-            Self::IoError => write!(f, "I/O error occurred")
-        }
     }
 }

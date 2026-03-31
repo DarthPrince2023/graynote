@@ -8,10 +8,10 @@ authors = ["Joshua Prince"]
 axum = { version = "0.8.8", features = ["http2", "ws"] }
 axum-server = { version = "0.8.0", features = ["rustls", "tls-rustls"] }
 chrono = { version = "0.4.44", features = ["serde"] }
-dioxus = "0.7.3"
 dotenvy = "0.15.7"
 jwt = { git = "https://github.com/DarthPrince2023/jwt-generator", branch = "main" }
 hmac_crate = { git = "https://github.com/DarthPrince2023/hmac_sha256" }
+graynote_lib = { git = "https://github.com/DarthPrince2023/graynote_lib", branch = "main" }
 reqwest = "0.13.2"
 rust-argon2 = "3.0.0"
 serde = { version = "1.0.228", features = ["derive", "serde_derive"] }

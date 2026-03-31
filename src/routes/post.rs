@@ -3,17 +3,11 @@ use axum::{
     response::IntoResponse
 };
 use chrono::Utc;
+use graynote_lib::types::structs::{AdminUserInfoRequest, AuthToken, BasicAuth, CaseAccess, CaseDetails, Notes, UserAccessManagement, UserInfo};
 use serde_json::json;
 use tracing::{error, info};
 
-use crate::{
-    database::{
-        Database, types::{AdminUserInfoRequest, AuthToken, CaseAccess, CaseDetails, Notes, UserAccessManagement, UserInfo}
-    },
-    routes::{
-        SharedState, client_modifier::BasicAuth
-    }
-};
+use crate::{database::Database, routes::SharedState};
 
 #[tracing::instrument(skip(state, user), name = "CREATE USER")]
 pub async fn create_user(State(state): State<SharedState>, Json(user): Json<UserInfo>) -> impl IntoResponse {

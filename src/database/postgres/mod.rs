@@ -1,12 +1,7 @@
 use std::env::var;
 
-use crate::{
-    database::{
-        Database, types::{
-            AdminUserInfoRequest, CaseAccess, CaseDetails, CaseInformation, NoteDetails, Notes, UserInfo
-        }
-    },
-    routes::{Error, client_modifier::BasicAuth}
+use graynote_lib::types::{
+    error::Error, structs::{AdminUserInfoRequest, CaseAccess, CaseDetails, CaseInformation, NoteDetails, Notes, UserInfo, basic_auth::BasicAuth}
 };
 use argon2::Config;
 use chrono::{DateTime, Utc};
@@ -18,6 +13,8 @@ use sqlx::{
 use subtle::ConstantTimeEq;
 use tracing::{error, info, warn};
 use uuid::Uuid;
+
+use crate::database::Database;
 
 const WEEKTIME_CALCULATION: i64 = 7 * 24 * 3_600;
 

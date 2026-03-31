@@ -1,10 +1,16 @@
+pub mod postgres;
+
+use std::future::Future;
+use graynote_lib::types::{
+    error::Error, structs::{
+        AdminUserInfoRequest, BasicAuth, CaseAccess,
+        CaseDetails, CaseInformation, NoteDetails,
+        Notes, UserInfo
+    }
+};
 use jwt::TokenPieces;
 use uuid::Uuid;
-use crate::{database::types::{AdminUserInfoRequest, CaseAccess, CaseDetails, CaseInformation, NoteDetails, Notes, UserInfo}, routes::{Error, client_modifier::BasicAuth}};
-use std::future::Future;
 
-pub mod postgres;
-pub mod types;
 
 ///
 /// `'Database'` trait allows us to implement this for different DB connector/interface types.
@@ -49,4 +55,4 @@ pub trait Database {
     fn find_accessible_notes(&self, session_id: String, token: String) -> impl Future<Output = Result<Vec<NoteDetails>, Error>> + Send;
     fn is_access_granted(&self, session_id: &str, token: &str, case_number: &Option<Uuid>, create_post: bool) -> impl Future<Output = Result<(bool, TokenPieces), Error>> + Send;
     fn delete_invalid_token(&self, token: &str) -> impl Future<Output = Result<bool, Error>> + Send;
-} 
+}
