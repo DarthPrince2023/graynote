@@ -120,7 +120,7 @@ impl Database for Pool<Postgres> {
     }
 
     async fn login_basic(&self, basic_auth: &BasicAuth) -> Result<(String, Uuid), Error> {
-        info!("Trying to login for user {} at {}", basic_auth.username, Utc::now());
+        info!("Trying to login at {}", Utc::now());
         let user: Option<UserInfo> = match sqlx::query_as(
             "SELECT *
                 FROM users
@@ -130,12 +130,12 @@ impl Database for Pool<Postgres> {
             .fetch_optional(self)
             .await {
                 Ok(user) => {
-                    info!("Retrieved user at {}", Utc::now());
+                    info!("Found user at {}", Utc::now());
 
                     user
                 }, 
                 Err(error) => {
-                    error!("Unable to locate user at {}", Utc::now());
+                    error!("Invalid credentials at {}", Utc::now());
 
                     return Err(error.into())
                 }
@@ -150,7 +150,7 @@ impl Database for Pool<Postgres> {
                 let token = TokenPieces::new(header, payload);
 
                 if !argon2::verify_encoded(user.password_id.as_str(), basic_auth.password.as_ref().ok_or(Error::InvalidCredentials)?.as_bytes())? {
-                    error!("Could not verify hash at {}", Utc::now());
+                    error!("Invalid credentials at {}", Utc::now());
                     
                     return Err(Error::InvalidCredentials)
                 }
@@ -163,7 +163,7 @@ impl Database for Pool<Postgres> {
                 }
             },
             None => {
-                error!("No user found at {}", Utc::now());
+                error!("Invalid credentials at {}", Utc::now());
                 argon2::verify_encoded("$NULLHASHjnlnnkn$", b"DO NOT VERIFY.")?;
 
                 Err(Error::InvalidCredentials)

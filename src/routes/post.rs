@@ -3,14 +3,45 @@ use axum::{
     response::IntoResponse
 };
 use chrono::Utc;
-use graynote_lib::types::structs::{AdminUserInfoRequest, AuthToken, BasicAuth, CaseAccess, CaseDetails, Notes, UserAccessManagement, UserInfo};
+use graynote_lib::types::structs::{
+    AdminUserInfoRequest, AuthToken,
+    BasicAuth, CaseAccess, CaseDetails,
+    Notes, UserAccessManagement, UserInfo
+};
+use jwt::TokenPieces;
 use serde_json::json;
 use tracing::{error, info};
 
 use crate::{database::Database, routes::SharedState};
 
+#[tracing::instrument(skip(state), name = "RATE LIMIT CHECK")]
+pub async fn rate_limit_check(mut state: SharedState, token: String) -> impl IntoResponse {
+    info!("Extracting token pieces to check rate limit at {}", Utc::now());
+    let payload = match TokenPieces::try_from(token.as_str()) {
+        Ok(payload) => payload,
+        Err(_) => {
+            error!("Invalid credentials at {}", Utc::now());
+            return (StatusCode::BAD_REQUEST, json!({"message": "Invalid credentials"}).to_string());
+        }
+    };
+    let username = payload.get_payload().username;
+
+    info!("Rate limit checking at {}", Utc::now());
+    if !state.use_request_token(username).await {
+        return (StatusCode::TOO_MANY_REQUESTS, json!({"message": "Rate limit exceeded"}).to_string());
+    }
+
+    (StatusCode::OK, json!({"message": "Rate limit check passed"}).to_string())
+}
+
 #[tracing::instrument(skip(state, user), name = "CREATE USER")]
-pub async fn create_user(State(state): State<SharedState>, Json(user): Json<UserInfo>) -> impl IntoResponse {
+pub async fn create_user(State(mut state): State<SharedState>, Json(user): Json<UserInfo>) -> impl IntoResponse {
+    // Since we have the username, we can perform a simple rate limit check, before attempting to create user.
+    info!("Rate limit checking at {}", Utc::now());
+    if !state.use_request_token(user.user_handle.clone()).await {
+        return (StatusCode::TOO_MANY_REQUESTS, json!({"message": "Rate limit exceeded"}).to_string());
+    }
+
     info!("Attempting to creater user at {}", Utc::now());
     match state.postgres_pool.insert_user(user).await {
         Ok(()) => {
@@ -27,7 +58,13 @@ pub async fn create_user(State(state): State<SharedState>, Json(user): Json<User
 }
 
 #[tracing::instrument(skip(state, basic_auth), name = "BASIC AUTHENTICATION")]
-pub async fn basic_login(State(state): State<SharedState>, Json(basic_auth): Json<BasicAuth>) -> impl IntoResponse {
+pub async fn basic_login(State(mut state): State<SharedState>, Json(basic_auth): Json<BasicAuth>) -> impl IntoResponse {
+    // Since we have the username, we can perform a simple rate limit check before attempting to authorize login.
+    info!("Rate limit checking at {}", Utc::now());
+    if !state.use_request_token(basic_auth.username.clone()).await {
+        return (StatusCode::TOO_MANY_REQUESTS, json!({"message": "Rate limit exceeded"}).to_string());
+    }
+
     info!("Attempting login authorization at {}", Utc::now());
     match state.postgres_pool.login_basic(&basic_auth).await {
         Ok(token) => {
@@ -45,6 +82,12 @@ pub async fn basic_login(State(state): State<SharedState>, Json(basic_auth): Jso
 
 #[tracing::instrument(skip(shared_state, case), name = "GET CASE INFORMATION")]
 pub async fn get_case_information(State(shared_state): State<SharedState>, Json(case): Json<CaseDetails>) -> impl IntoResponse {
+    // We do not have the username at this point,
+    //  so we will just perform a rate limit check using the token, and if it fails, we will return an error.
+    // If it succeeds, we will attempt to retrieve the case information.
+    info!("Rate limit checking at {}", Utc::now());
+    let _ = rate_limit_check(shared_state.clone(), case.token.clone()).await;
+
     info!("Attempting to retrieve information about case at {}", Utc::now());
     let case_info = match shared_state.postgres_pool.get_case_information(&case).await {
         Ok(case_info) => {
@@ -71,6 +114,12 @@ pub async fn get_case_information(State(shared_state): State<SharedState>, Json(
 
 #[tracing::instrument(skip(shared_state, case), name = "GET CASE NOTES")]
 pub async fn get_case_notes(State(shared_state): State<SharedState>, Json(case): Json<CaseDetails>) -> impl IntoResponse {
+    // We do not have the username at this point,
+    //  so we will just perform a rate limit check using the token, and if it fails, we will return an error.
+    // If it succeeds, we will attempt to retrieve the case information.
+    info!("Rate limit checking at {}", Utc::now());
+    let _ = rate_limit_check(shared_state.clone(), case.token.clone()).await;
+
     info!("Attempting to retrieve notes for case {} at {}", case.case_number, Utc::now());
     match shared_state.postgres_pool.get_case_notes(&case).await {
         Ok(case_notes) => {
@@ -94,6 +143,12 @@ pub async fn get_case_notes(State(shared_state): State<SharedState>, Json(case):
 
 #[tracing::instrument(skip(shared_state, token), name = "FIND ACCESSIBLE CASES")]
 pub async fn find_accessible_cases(State(shared_state): State<SharedState>, Json(token): Json<AuthToken>) -> impl IntoResponse {
+    // We do not have the username at this point,
+    //  so we will just perform a rate limit check using the token, and if it fails, we will return an error.
+    // If it succeeds, we will attempt to retrieve the case information.
+    info!("Rate limit checking at {}", Utc::now());
+    let _ = rate_limit_check(shared_state.clone(), token.token.clone()).await;
+
     info!("Retrieving accessible cases for given user");
     let cases = match shared_state.postgres_pool.find_accessible_cases(token.token, token.session_id).await {
         Ok(cases) => {
@@ -117,6 +172,12 @@ pub async fn find_accessible_cases(State(shared_state): State<SharedState>, Json
 
 #[tracing::instrument(skip(shared_state, token), name = "GET ACCESSIBLE NOTES")]
 pub async fn find_accessible_notes(State(shared_state): State<SharedState>, Json(token): Json<AuthToken>) -> impl IntoResponse {
+    // We do not have the username at this point,
+    //  so we will just perform a rate limit check using the token, and if it fails, we will return an error.
+    // If it succeeds, we will attempt to retrieve the case information.
+    info!("Rate limit checking at {}", Utc::now());
+    let _ = rate_limit_check(shared_state.clone(), token.token.clone()).await;
+    
     info!("Retrieving accessible notes for given user at {}", Utc::now());
     let notes = match shared_state.postgres_pool.find_accessible_notes(token.session_id, token.token).await {
         Ok(notes) => {
@@ -143,6 +204,12 @@ pub async fn find_accessible_notes(State(shared_state): State<SharedState>, Json
 
 #[tracing::instrument(skip(shared_state, admin_request), name = "GET USER INFORMATION")]
 pub async fn fetch_user_info_admin(State(shared_state): State<SharedState>, Json(admin_request): Json<AdminUserInfoRequest>) -> impl IntoResponse {
+    // We do not have the username at this point,
+    //  so we will just perform a rate limit check using the token, and if it fails, we will return an error.
+    // If it succeeds, we will attempt to retrieve the case information.
+    info!("Rate limit checking at {}", Utc::now());
+    let _ = rate_limit_check(shared_state.clone(), admin_request.admin_token.clone()).await;
+
     info!("Attempting to retrieve user information at {}", Utc::now());
     match shared_state.postgres_pool.admin_get_user_info(admin_request).await {
         Ok(user) => {
@@ -160,6 +227,12 @@ pub async fn fetch_user_info_admin(State(shared_state): State<SharedState>, Json
 
 #[tracing::instrument(skip(shared_state, uac_management), name = "ADD MEMBER USER ACCESS CONTROL")]
 pub async fn add_uac_member(State(shared_state): State<SharedState>, Json(uac_management): Json<UserAccessManagement>) -> impl IntoResponse {
+    // We do not have the username at this point,
+    //  so we will just perform a rate limit check using the token, and if it fails, we will return an error.
+    // If it succeeds, we will attempt to retrieve the case information.
+    info!("Rate limit checking at {}", Utc::now());
+    let _ = rate_limit_check(shared_state.clone(), uac_management.token.clone()).await;
+    
     info!("Adding access for case {} to user at {}", uac_management.case_number, Utc::now());
     match shared_state.postgres_pool.add_uac_member(uac_management.case_number, uac_management.token, uac_management.session_id, uac_management.target_user).await {
         Ok(()) => {
@@ -177,6 +250,12 @@ pub async fn add_uac_member(State(shared_state): State<SharedState>, Json(uac_ma
 
 #[tracing::instrument(skip(shared_state, note), name = "ADD NOTE TO CASE")]
 pub async fn insert_note(State(shared_state): State<SharedState>, Json(note): Json<Notes>) -> impl IntoResponse {
+    // We do not have the username at this point,
+    //  so we will just perform a rate limit check using the token, and if it fails, we will return an error.
+    // If it succeeds, we will attempt to retrieve the case information.
+    info!("Rate limit checking at {}", Utc::now());
+    let _ = rate_limit_check(shared_state.clone(), note.token.clone()).await;
+
     info!("Adding note to case...");
     match shared_state.postgres_pool.insert_note(&note).await {
         Ok(()) => {
@@ -194,6 +273,12 @@ pub async fn insert_note(State(shared_state): State<SharedState>, Json(note): Js
 
 #[tracing::instrument(skip(shared_state, case), name = "FILE NEW CASE")]
 pub async fn new_case(State(shared_state): State<SharedState>, Json(case): Json<CaseAccess>) -> impl IntoResponse {
+    // We do not have the username at this point,
+    //  so we will just perform a rate limit check using the token, and if it fails, we will return an error.
+    // If it succeeds, we will attempt to retrieve the case information.
+    info!("Rate limit checking at {}", Utc::now());
+    let _ = rate_limit_check(shared_state.clone(), case.token.clone()).await;
+
     info!("Attempting to create new case");
     match shared_state.postgres_pool.insert_case_information(case).await  {
         Ok(case_number) => {

@@ -7,10 +7,13 @@ use sqlx::{
 use tracing::warn;
 use tracing_log::log::info;
 use tracing_subscriber::{EnvFilter, fmt};
-use std::env::var;
+use std::{collections::HashMap, env::var};
 use graynote_lib::types::error::Error;
 
+use crate::routes::rate_limiter::RateLimiter;
+
 pub mod post;
+pub mod rate_limiter;
 
 ///
 /// Shared state we use in the service for handling things like persistent database connectivity.
@@ -20,6 +23,7 @@ pub struct SharedState {
     pub postgres_pool: Pool<Postgres>,
     pub client: Client,
     pub key: String,
+    pub user_rates: HashMap<String, RateLimiter>,
     pub rustls_config: RustlsConfig
 }
 
@@ -52,6 +56,7 @@ impl SharedState {
 
         let key = var("MASTER_KEY")?;
         let use_https_strict_rule: bool = var("RESTRICT_HTTPS_ONLY")?.parse()?;
+        let user_rates = HashMap::new();
 
         info!("Trying to create Rustls Configuration using provided certificates");
         let rustls_config = RustlsConfig::from_pem_file(
@@ -78,9 +83,25 @@ impl SharedState {
                 postgres_pool,
                 client,
                 key,
+                user_rates,
                 rustls_config
             }
         )
+    }
+
+    pub async fn use_request_token(&mut self, username: String) -> bool {
+        let default_rate_limiter = RateLimiter::new();
+        let rate_limiter = self.user_rates.get(&username);
+
+        if let Some(rate_limiter) = rate_limiter {
+            return rate_limiter.try_acquire().await
+        } else {
+            self.user_rates.insert(username.clone(), default_rate_limiter.clone());
+
+            info!("Created new rate limiter for user {} at {}", username, Utc::now());
+
+            return default_rate_limiter.try_acquire().await
+        }
     }
 
     pub fn init_tracing() {
