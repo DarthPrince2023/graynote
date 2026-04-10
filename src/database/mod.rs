@@ -11,7 +11,6 @@ use graynote_lib::types::{
 use jwt::TokenPieces;
 use uuid::Uuid;
 
-
 ///
 /// `'Database'` trait allows us to implement this for different DB connector/interface types.
 /// 
@@ -53,6 +52,6 @@ pub trait Database {
     fn add_uac_member(&self, case_number: Uuid, token: String, session_id: String, target_user: Uuid) -> impl Future<Output = Result<(), Error>> + Send;
     fn find_accessible_cases(&self, token: String, session_id: String) -> impl Future<Output = Result<Vec<CaseInformation>, Error>> + Send;
     fn find_accessible_notes(&self, session_id: String, token: String) -> impl Future<Output = Result<Vec<NoteDetails>, Error>> + Send;
-    fn is_access_granted(&self, session_id: &str, token: &str, case_number: &Option<Uuid>, create_post: bool) -> impl Future<Output = Result<(bool, TokenPieces), Error>> + Send;
+    fn is_access_granted(&self, session_id: &str, token: &str, case_number: &Option<Uuid>) -> impl Future<Output = Result<TokenPieces, Error>> + Send;
     fn delete_invalid_token(&self, token: &str) -> impl Future<Output = Result<bool, Error>> + Send;
 }
