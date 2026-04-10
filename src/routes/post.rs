@@ -31,7 +31,7 @@ pub async fn basic_login(State(state): State<SharedState>, Json(basic_auth): Jso
     info!("Attempting login authorization at {}", Utc::now());
     match state.postgres_pool.login_basic(&basic_auth).await {
         Ok(token) => {
-            info!("User login request authorized at {} for user {}", Utc::now(), basic_auth.username);
+            info!("User login request authorized at {}", Utc::now());
 
             (StatusCode::OK, json!({"message": "Logged in successfully.", "token": token.0, "session_id": token.1}).to_string())
         },
