@@ -1,6 +1,5 @@
 extern crate argon2;
 use std::net::SocketAddr;
-
 use axum::{Router, routing::post};
 use chrono::Utc;
 use tracing::info;
@@ -15,10 +14,11 @@ async fn main() {
     // Get a new shared state instance, or return error on failure
     SharedState::init_tracing();
     info!("Tracing initialized; constructing SharedState at {}", Utc::now());
-    let (state, rustls_config) = match SharedState::new().await {
+    let state = match SharedState::new().await {
         Ok(state) => state,
         Err(error) => panic!("Could not create shared state => {error:?}")
     };
+    let rustls_config = state.rustls_config.clone();
 
     info!("Attempting to build Router at {}", Utc::now());
     let router = Router::new()
@@ -37,7 +37,7 @@ async fn main() {
     info!("Attempting to create TCP listener at {}", Utc::now());
     let listener = SocketAddr::from(([0, 0, 0, 0], 8443));
 
-    info!("Serving listener at {}", Utc::now());
+    info!("Serving over HTTPS listener at {}", Utc::now());
     let _ = axum_server::bind_rustls(listener, rustls_config)
         .serve(router.into_make_service())
         .await;

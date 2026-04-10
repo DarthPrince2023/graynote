@@ -1,8 +1,10 @@
-use axum_server::tls_rustls::RustlsConfig;
+use axum_server::{AddrListener, Server, tls_rustls::RustlsConfig};
+use chrono::Utc;
 use reqwest::Client;
 use sqlx::{
     Postgres, Pool, postgres::PgPoolOptions
 };
+use tracing::warn;
 use tracing_log::log::info;
 use tracing_subscriber::{EnvFilter, fmt};
 use std::env::var;
@@ -17,17 +19,37 @@ pub mod post;
 pub struct SharedState {
     pub postgres_pool: Pool<Postgres>,
     pub client: Client,
-    pub key: String
+    pub key: String,
+    pub rustls_config: RustlsConfig
 }
 
 impl SharedState {
     ///
     /// instantiate a new shared state instance for our service
     /// 
-    pub async fn new() -> Result<(Self, RustlsConfig), Error> {
+    pub async fn new() -> Result<Self, Error> {
         // Attempt to get a postgres connection
         info!("Retrieving necessary environment variables");
-        let url = &var("DATABASE_URL")?;
+        let data_base_type = var("DATABASE_TYPE")?;
+        let database_user = var("DATABASE_USER")?;
+        let database_password = var("DATABASE_PASSWORD")?;
+        let database_host = var("DATABASE_HOST")?;
+        let database_schema = var("DATABASE_SCHEMA")?;
+        let url_value = var("DATABASE_URL")?;
+        let mut url = String::new();
+
+        if let Some(_) = url_value.is_empty().then(|| {
+            warn!("DATABASE_URL environment variable is not set, falling back to constructing URL from other environment variables at {}", Utc::now());
+        }) {
+            info!("DATABASE_URL environment variable is not set, falling back to constructing URL from other environment variables at {}", Utc::now());
+
+            url.push_str(&format!("{data_base_type}://{database_user}:{database_password}@{database_host}:5432/{database_schema}"));
+        } else {
+            info!("DATABASE_URL environment variable is set, using it to connect to database at {}", Utc::now());
+
+            url.push_str(&url_value);
+        }
+
         let key = var("MASTER_KEY")?;
         let use_https_strict_rule: bool = var("RESTRICT_HTTPS_ONLY")?.parse()?;
 
@@ -42,7 +64,7 @@ impl SharedState {
         let postgres_pool = PgPoolOptions::new()
             .min_connections(1)
             .max_connections(10)
-            .connect(url)
+            .connect(&url)
             .await?;
 
         // Get a request sender
@@ -52,11 +74,12 @@ impl SharedState {
             .build()?;
 
         Ok(
-            (Self {
+            Self {
                 postgres_pool,
                 client,
-                key
-            }, rustls_config)
+                key,
+                rustls_config
+            }
         )
     }
 
