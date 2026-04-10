@@ -14,7 +14,7 @@ services:
   locker-db:
     image: postgres:latest
     ports:
-      - ":5432"
+      - "5432:5432"
     volumes:
       - locker:/var/lib/postgres/data
       - ./src/database/migrations/structure.sql:/docker-entrypoint-initdb.d/structure.sql

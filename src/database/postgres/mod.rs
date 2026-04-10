@@ -83,8 +83,6 @@ impl Database for Pool<Postgres> {
 
                 return Err(Error::Unauthorized);
             };
-
-        info!("Checking if user exists for handle at {}", Utc::now());
         if self.user_exists(&user.user_handle).await? {
             error!("Could not create user, handle in use at {}", Utc::now());
 
