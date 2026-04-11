@@ -4,10 +4,11 @@ use reqwest::Client;
 use sqlx::{
     Postgres, Pool, postgres::PgPoolOptions
 };
+use tokio::sync::Mutex;
 use tracing::warn;
 use tracing_log::log::info;
 use tracing_subscriber::{EnvFilter, fmt};
-use std::{collections::HashMap, env::var};
+use std::{collections::HashMap, env::var, sync::Arc};
 use graynote_lib::types::error::Error;
 
 use crate::routes::rate_limiter::RateLimiter;
@@ -23,7 +24,7 @@ pub struct SharedState {
     pub postgres_pool: Pool<Postgres>,
     pub client: Client,
     pub key: String,
-    pub user_rates: HashMap<String, RateLimiter>,
+    pub user_rates: Arc<Mutex<HashMap<String, RateLimiter>>>,
     pub rustls_config: RustlsConfig
 }
 
@@ -56,7 +57,7 @@ impl SharedState {
 
         let key = var("MASTER_KEY")?;
         let use_https_strict_rule: bool = var("RESTRICT_HTTPS_ONLY")?.parse()?;
-        let user_rates = HashMap::new();
+        let user_rates = Arc::new(Mutex::new(HashMap::new()));
 
         info!("Trying to create Rustls Configuration using provided certificates");
         let rustls_config = RustlsConfig::from_pem_file(
@@ -91,14 +92,13 @@ impl SharedState {
 
     pub async fn use_request_token(&mut self, username: String) -> bool {
         let default_rate_limiter = RateLimiter::new();
-        let rate_limiter = self.user_rates.get(&username);
+        let mut user_rates_lock = self.user_rates.lock().await;
+        let rate_limiter = user_rates_lock.get(&username);
 
         if let Some(rate_limiter) = rate_limiter {
             return rate_limiter.try_acquire().await
         } else {
-            self.user_rates.insert(username.clone(), default_rate_limiter.clone());
-
-            info!("Created new rate limiter for user {} at {}", username, Utc::now());
+            user_rates_lock.insert(username.clone(), default_rate_limiter.clone());
 
             return default_rate_limiter.try_acquire().await
         }

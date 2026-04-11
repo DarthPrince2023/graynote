@@ -23,7 +23,7 @@ impl RateLimiter {
 
         if let Ok(permit) = semaphore_lock.try_acquire() {
             permit.forget();
-
+            
             return_value = true;
         }
 
