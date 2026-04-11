@@ -1,7 +1,7 @@
 -- Users table
 CREATE TABLE IF NOT EXISTS users (
     user_id UUID PRIMARY KEY NOT NULL,
-    user_handle TEXT NOT NULL,
+    user_handle TEXT NOT NULL UNIQUE,
     password_id TEXT NOT NULL,
     user_role TEXT,
     created_at TIMESTAMPTZ DEFAULT now()
