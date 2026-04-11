@@ -42,9 +42,9 @@ impl SharedState {
         let url_value = var("DATABASE_URL")?;
         let mut url = String::new();
 
-        if let Some(_) = url_value.is_empty().then(|| {
+        if url_value.is_empty().then(|| {
             warn!("DATABASE_URL environment variable is not set, falling back to constructing URL from other environment variables at {}", Utc::now());
-        }) {
+        }).is_some() {
             info!("DATABASE_URL environment variable is not set, falling back to constructing URL from other environment variables at {}", Utc::now());
 
             url.push_str(&format!("{data_base_type}://{database_user}:{database_password}@{database_host}:5432/{database_schema}"));
