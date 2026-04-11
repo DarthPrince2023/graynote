@@ -90,7 +90,7 @@ impl SharedState {
     }
 
     pub async fn use_request_token(&mut self, username: String) -> bool {
-        let default_rate_limiter = RateLimiter::new();
+        let default_rate_limiter = RateLimiter::default();
         let mut user_rates_lock = self.user_rates.lock().await;
         let rate_limiter = user_rates_lock.get(&username);
 
