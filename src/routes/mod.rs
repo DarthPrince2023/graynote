@@ -5,8 +5,7 @@ use sqlx::{
     Postgres, Pool, postgres::PgPoolOptions
 };
 use tokio::sync::Mutex;
-use tracing::warn;
-use tracing_log::log::info;
+use tracing::{warn, info};
 use tracing_subscriber::{EnvFilter, fmt};
 use std::{collections::HashMap, env::var, sync::Arc};
 use graynote_lib::types::error::Error;

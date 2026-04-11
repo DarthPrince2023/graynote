@@ -10,7 +10,7 @@ pub struct RateLimiter {
 impl RateLimiter {
     pub fn new() -> Self {
         Self {
-            semaphore: Arc::new(Mutex::new(Semaphore::new(3))),
+            semaphore: Arc::new(Mutex::new(Semaphore::new(25))),
             last_used: Arc::new(Mutex::new(Instant::now())),
         }
     }
