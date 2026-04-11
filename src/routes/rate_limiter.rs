@@ -27,10 +27,10 @@ impl RateLimiter {
             return_value = true;
         }
 
-        if now.duration_since(*last_used_lock) > Duration::from_secs(3) {
+        if now.duration_since(*last_used_lock) > Duration::from_secs(60) {
             *last_used_lock = now;
 
-            semaphore_lock.add_permits(1);
+            semaphore_lock.add_permits(25);
         }
 
         drop(last_used_lock);
