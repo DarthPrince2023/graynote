@@ -14,9 +14,12 @@ COPY . .
 RUN cargo build --release
 
 # We do not need the Rust toolchain to run the binary!
-FROM debian:latest AS runtime
+FROM debian:latest
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/graynote /usr/local/bin/graynote
+RUN useradd -m -s /bin/bash graynote && \
+    chown graynote /usr/local/bin/graynote
+USER graynote
 ENTRYPOINT ["/usr/local/bin/graynote"]
