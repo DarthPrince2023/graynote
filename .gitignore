@@ -1,6 +1,5 @@
 /ssl_certificates
 /target
 /test_files
-/built_test_files
 .env
 Cargo.lock

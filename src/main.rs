@@ -22,7 +22,7 @@ async fn main() {
         Err(error) => {
             error!("Could not create shared state => {error:?}");
 
-            return ()
+            return;
         }
     };
 
@@ -32,7 +32,7 @@ async fn main() {
         Err(error) => {
             error!("Could not get HeaderValue from provided input => {error}");
 
-            return ()
+            return;
         }
     };
     let cors = CorsLayer::new()
