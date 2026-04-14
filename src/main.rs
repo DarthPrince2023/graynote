@@ -1,4 +1,3 @@
-extern crate argon2;
 use std::net::SocketAddr;
 
 use axum::{Router, http::HeaderValue, routing::post};
