@@ -1,8 +1,13 @@
 use axum::{Json, extract::State};
 use chrono::Utc;
-use graynote_lib::types::{error::Error, structs::{
-    AdminUserInfoRequest, AuthToken, BasicAuth, CaseAccess, CaseDetails, CaseInformation, NoteDetails, Notes, UserAccessManagement, UserInfo
-}};
+use graynote_lib::types::{
+    error::Error, structs::{
+        AdminUserInfoRequest, AuthToken, BasicAuth,
+        CaseAccess, CaseDetails, CaseInformation,
+        NoteDetails, Notes, UserAccessManagement,
+        UserInfo
+    }
+};
 use jwt::TokenPieces;
 use serde_json::{Value, json};
 use tracing::info;
