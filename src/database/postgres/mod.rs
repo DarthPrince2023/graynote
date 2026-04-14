@@ -276,7 +276,7 @@ impl Database for Pool<Postgres> {
             .bind(Uuid::parse_str(pieces.get_payload().sub.as_str())?)
             .bind(note_details.note_text.as_str())
             .bind(&note_details.relevant_media)
-            .bind(note_details.entry_timestamp.unwrap_or(Utc::now()))
+            .bind(note_details.entry_timestamp)
             .bind(note_details.case_number)
             .execute(self)
             .await {
