@@ -1,15 +1,10 @@
-use axum::{
-    Json, extract::State, http::StatusCode,
-    response::IntoResponse
-};
+use axum::{Json, extract::State};
 use chrono::Utc;
 use graynote_lib::types::{error::Error, structs::{
-    AdminUserInfoRequest, AuthToken,
-    BasicAuth, CaseAccess, CaseDetails,
-    Notes, UserAccessManagement, UserInfo
+    AdminUserInfoRequest, AuthToken, BasicAuth, CaseAccess, CaseDetails, CaseInformation, NoteDetails, Notes, UserAccessManagement, UserInfo
 }};
 use jwt::TokenPieces;
-use serde_json::json;
+use serde_json::{Value, json};
 use tracing::info;
 
 use crate::{database::Database, routes::SharedState};
@@ -29,7 +24,7 @@ pub async fn rate_limit_check(mut state: SharedState, token: String) -> Result<(
 }
 
 #[tracing::instrument(skip(state, user), name = "CREATE USER")]
-pub async fn create_user(State(mut state): State<SharedState>, Json(user): Json<UserInfo>) -> Result<impl IntoResponse, Error> {
+pub async fn create_user(State(mut state): State<SharedState>, Json(user): Json<UserInfo>) -> Result<Json<Value>, Error> {
     // Since we have the username, we can perform a simple rate limit check, before attempting to create user.
     info!("Rate limit checking at {}", Utc::now());
     if !state.use_request_token(user.user_handle.clone()).await {
@@ -40,12 +35,12 @@ pub async fn create_user(State(mut state): State<SharedState>, Json(user): Json<
     state.postgres_pool.insert_user(user).await?;
 
     info!("Created user successfully at {}", Utc::now());
-    return Ok((StatusCode::CREATED, json!({"message": "User added."}).to_string()));
+    
+    Ok(Json(json!({"message": "User added."})))
 }
 
 #[tracing::instrument(skip(state, basic_auth), name = "BASIC AUTHENTICATION")]
-pub async fn basic_login(State(mut state): State<SharedState>, Json(basic_auth): Json<BasicAuth>) -> Result<impl IntoResponse, Error> {
-    // Since we have the username, we can perform a simple rate limit check before attempting to authorize login.
+pub async fn basic_login(State(mut state): State<SharedState>, Json(basic_auth): Json<BasicAuth>) -> Result<Json<Value>, Error> {
     info!("Rate limit checking at {}", Utc::now());
     if !state.use_request_token(basic_auth.username.clone()).await {
         return Err(Error::RateLimitExceeded);
@@ -56,11 +51,11 @@ pub async fn basic_login(State(mut state): State<SharedState>, Json(basic_auth):
 
     info!("User login request authorized at {}", Utc::now());
 
-    return Ok((StatusCode::OK, Json(json!({"message": "Logged in successfully.", "token": token.0, "session_id": token.1}))));
+    Ok(Json(json!({"message": "Logged in successfully.", "token": token.0, "session_id": token.1})))
 }
 
 #[tracing::instrument(skip(shared_state, case), name = "GET CASE INFORMATION")]
-pub async fn get_case_information(State(shared_state): State<SharedState>, Json(case): Json<CaseDetails>) -> Result<impl IntoResponse, Error> {
+pub async fn get_case_information(State(shared_state): State<SharedState>, Json(case): Json<CaseDetails>) -> Result<Json<CaseInformation>, Error> {
     // We do not have the username at this point,
     //  so we will just perform a rate limit check using the token, and if it fails, we will return an error.
     // If it succeeds, we will attempt to retrieve the case information.
@@ -72,14 +67,11 @@ pub async fn get_case_information(State(shared_state): State<SharedState>, Json(
 
     info!("Retrieved information for case {} at {} for {}", case.case_number, Utc::now(), case_info.user_id);
 
-    return Ok((StatusCode::OK, Json(serde_json::to_value(case_info)?)))
+    Ok(Json(case_info))
 }
 
 #[tracing::instrument(skip(shared_state, case), name = "GET CASE NOTES")]
-pub async fn get_case_notes(State(shared_state): State<SharedState>, Json(case): Json<CaseDetails>) -> Result<impl IntoResponse, Error> {
-    // We do not have the username at this point,
-    //  so we will just perform a rate limit check using the token, and if it fails, we will return an error.
-    // If it succeeds, we will attempt to retrieve the case information.
+pub async fn get_case_notes(State(shared_state): State<SharedState>, Json(case): Json<CaseDetails>) -> Result<Json<Vec<NoteDetails>>, Error> {
     info!("Rate limit checking at {}", Utc::now());
     rate_limit_check(shared_state.clone(), case.token.clone()).await?;
 
@@ -88,14 +80,11 @@ pub async fn get_case_notes(State(shared_state): State<SharedState>, Json(case):
     
     info!("Retrieved notes for case {} at {}", case.case_number, Utc::now());
     
-    return Ok((StatusCode::OK, Json(serde_json::to_value(case_notes)?)))
+    Ok(Json(case_notes))
 }
 
 #[tracing::instrument(skip(shared_state, token), name = "FIND ACCESSIBLE CASES")]
-pub async fn find_accessible_cases(State(shared_state): State<SharedState>, Json(token): Json<AuthToken>) -> Result<impl IntoResponse, Error> {
-    // We do not have the username at this point,
-    //  so we will just perform a rate limit check using the token, and if it fails, we will return an error.
-    // If it succeeds, we will attempt to retrieve the case information.
+pub async fn find_accessible_cases(State(shared_state): State<SharedState>, Json(token): Json<AuthToken>) -> Result<Json<Vec<CaseInformation>>, Error> {
     info!("Rate limit checking at {}", Utc::now());
     rate_limit_check(shared_state.clone(), token.token.clone()).await?;
 
@@ -104,14 +93,11 @@ pub async fn find_accessible_cases(State(shared_state): State<SharedState>, Json
 
     info!("Retrieved accessible cases");
     
-    return Ok((StatusCode::OK, Json(serde_json::to_value(cases)?)))
+    Ok(Json(cases))
 }
 
 #[tracing::instrument(skip(shared_state, token), name = "GET ACCESSIBLE NOTES")]
-pub async fn find_accessible_notes(State(shared_state): State<SharedState>, Json(token): Json<AuthToken>) -> Result<impl IntoResponse, Error> {
-    // We do not have the username at this point,
-    //  so we will just perform a rate limit check using the token, and if it fails, we will return an error.
-    // If it succeeds, we will attempt to retrieve the case information.
+pub async fn find_accessible_notes(State(shared_state): State<SharedState>, Json(token): Json<AuthToken>) -> Result<Json<Vec<NoteDetails>>, Error> {
     info!("Rate limit checking at {}", Utc::now());
     rate_limit_check(shared_state.clone(), token.token.clone()).await?;
     
@@ -120,14 +106,11 @@ pub async fn find_accessible_notes(State(shared_state): State<SharedState>, Json
     
     info!("Retrieved notes for given user at {}", Utc::now());
 
-    return Ok((StatusCode::OK, Json(serde_json::to_value(notes)?)))
+    Ok(Json(notes))
 }
 
 #[tracing::instrument(skip(shared_state, admin_request), name = "GET USER INFORMATION")]
-pub async fn fetch_user_info_admin(State(shared_state): State<SharedState>, Json(admin_request): Json<AdminUserInfoRequest>) -> Result<impl IntoResponse, Error> {
-    // We do not have the username at this point,
-    //  so we will just perform a rate limit check using the token, and if it fails, we will return an error.
-    // If it succeeds, we will attempt to retrieve the case information.
+pub async fn fetch_user_info_admin(State(shared_state): State<SharedState>, Json(admin_request): Json<AdminUserInfoRequest>) -> Result<Json<Value>, Error> {
     info!("Rate limit checking at {}", Utc::now());
     rate_limit_check(shared_state.clone(), admin_request.admin_token.clone()).await?;
 
@@ -136,14 +119,11 @@ pub async fn fetch_user_info_admin(State(shared_state): State<SharedState>, Json
     
     info!("Successfully retrieved user info at {}", Utc::now());
 
-    return Ok((StatusCode::OK, Json(json!({"message": "Retrieval success", "user": user_info}))))
+    Ok(Json(json!({"message": "Retrieval success", "user": user_info})))
 }
 
 #[tracing::instrument(skip(shared_state, uac_management), name = "ADD MEMBER USER ACCESS CONTROL")]
-pub async fn add_uac_member(State(shared_state): State<SharedState>, Json(uac_management): Json<UserAccessManagement>) -> Result<impl IntoResponse, Error> {
-    // We do not have the username at this point,
-    //  so we will just perform a rate limit check using the token, and if it fails, we will return an error.
-    // If it succeeds, we will attempt to retrieve the case information.
+pub async fn add_uac_member(State(shared_state): State<SharedState>, Json(uac_management): Json<UserAccessManagement>) -> Result<Json<Value>, Error> {
     info!("Rate limit checking at {}", Utc::now());
     rate_limit_check(shared_state.clone(), uac_management.token.clone()).await?;
     
@@ -152,30 +132,28 @@ pub async fn add_uac_member(State(shared_state): State<SharedState>, Json(uac_ma
     
     info!("Granted access for user {} at {}", uac_management.target_user, Utc::now());
 
-    return Ok((StatusCode::CREATED, Json(json!({"message":"Added user access to case"}))))
+    Ok(Json(json!({"message":"Added user access to case"})))
 }
 
 #[tracing::instrument(skip(shared_state, note), name = "ADD NOTE TO CASE")]
-pub async fn insert_note(State(shared_state): State<SharedState>, Json(note): Json<Notes>) -> Result<impl IntoResponse, Error> {
-    // We do not have the username at this point,
-    //  so we will just perform a rate limit check using the token, and if it fails, we will return an error.
-    // If it succeeds, we will attempt to retrieve the case information.
+pub async fn insert_note(State(shared_state): State<SharedState>, Json(note): Json<Notes>) -> Result<Json<Value>, Error> {
     info!("Rate limit checking at {}", Utc::now());
     rate_limit_check(shared_state.clone(), note.token.clone()).await?;
 
     info!("Adding note to case...");
     let () = shared_state.postgres_pool.insert_note(&note).await?;
 
-    info!("Note added to case by {} at {}.", note.note_details.author_id.expect("Author ID"), Utc::now());
+    if let Some(author_id) = note.note_details.author_id {
+        info!("Note added to case by {author_id} at {}.", Utc::now());
+    } else {
+        info!("Note added to case by unknown author at {}.", Utc::now());
+    }
 
-    return Ok((StatusCode::CREATED, Json(json!({"message": "Added note to case"}))))
+    Ok(Json(json!({"message": "Added note to case"})))
 }
 
 #[tracing::instrument(skip(shared_state, case), name = "FILE NEW CASE")]
-pub async fn new_case(State(shared_state): State<SharedState>, Json(case): Json<CaseAccess>) -> Result<impl IntoResponse, Error> {
-    // We do not have the username at this point,
-    //  so we will just perform a rate limit check using the token, and if it fails, we will return an error.
-    // If it succeeds, we will attempt to retrieve the case information.
+pub async fn new_case(State(shared_state): State<SharedState>, Json(case): Json<CaseAccess>) -> Result<Json<Value>, Error> {
     info!("Rate limit checking at {}", Utc::now());
     rate_limit_check(shared_state.clone(), case.token.clone()).await?;
 
@@ -184,5 +162,5 @@ pub async fn new_case(State(shared_state): State<SharedState>, Json(case): Json<
 
     info!("Case creation authorized at {} for case {case_number}", Utc::now());
 
-    return Ok((StatusCode::CREATED, Json(json!({ "message": "Case created", "case_number": case_number }))))
+    Ok(Json(json!({ "message": "Case created", "case_number": case_number })))
 }
