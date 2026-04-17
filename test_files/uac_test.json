@@ -1,6 +1,9 @@
 {
-    "session_id": "",
-    "token": "",
+    "auth_token": {
+        "token": "",
+        "session_id": ""
+    },
     "case_number": "",
+    "note_id": "",
     "target_user": ""
 }

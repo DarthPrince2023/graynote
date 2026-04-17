@@ -19,6 +19,10 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 RUN useradd -m -s /bin/bash graynote && \
-    chown graynote /usr/local/bin/graynote
+    chown graynote /usr/local/bin/graynote && \
+    mkdir -p /usr/local/bin/trace && \
+    chown graynote /usr/local/bin/trace
 USER graynote
+VOLUME [ "/usr/local/bin/trace" ]
+
 ENTRYPOINT ["/usr/local/bin/graynote"]

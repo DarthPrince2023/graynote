@@ -9,6 +9,8 @@
   		"suspect_ip": "",
   		"victim_name": ""
 	},
-	"session_id": "",
-    "token": ""
+	"auth_token": {
+        "token": "",
+        "session_id": ""
+	}
 }

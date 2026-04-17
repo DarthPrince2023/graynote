@@ -11,13 +11,14 @@ services:
       - .env
     volumes:
       - ./ssl_certificates:/ssl_certificates:ro
+      - ./logs:/usr/local/bin/trace:rw
   locker-db:
     image: postgres:latest
     ports:
       - "5432:5432"
     volumes:
       - locker:/var/lib/postgres/data
-      - ./src/database/migrations/structure.sql:/docker-entrypoint-initdb.d/structure.sql
+      - ./src/database/migrations:/docker-entrypoint-initdb.d
     environment:
       - POSTGRES_PORT=5432
       - POSTGRES_URL=${DATABASE_HOST}

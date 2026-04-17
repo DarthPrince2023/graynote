@@ -1,5 +1,7 @@
 {
-  "user_handle": "",
-  "admin_session_id": "",
-  "admin_token": ""
+  "username": "",
+  "admin_authorization": {
+        "token": "",
+        "session_id": ""
+  }
 }

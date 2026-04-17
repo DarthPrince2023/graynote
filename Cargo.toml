@@ -1,11 +1,11 @@
 [package]
 name = "graynote"
-version = "1.3.3"
+version = "2.0.0"
 edition = "2021"
 authors = ["Joshua Prince"]
 
 [dependencies]
-axum = { version = "0.8.8", features = ["http2", "ws"] }
+axum = { version = "0.8.9", features = ["http2", "ws"] }
 axum-server = { version = "0.8.0", features = ["rustls", "tls-rustls"] }
 chrono = { version = "0.4.44", features = ["serde"] }
 dotenvy = "0.15.7"
@@ -18,10 +18,13 @@ serde = { version = "1.0.228", features = ["derive", "serde_derive"] }
 serde_json = "1.0.149"
 sqlx = { version = "0.8.6", features = ["postgres", "runtime-tokio", "uuid", "chrono"] }
 subtle = "2.6.1"
-tokio = { version = "1.49.0", features = ["full"] }
+tokio = { version = "1.52.1", features = ["full"] }
 tower-http = { version = "0.6.8", features = ["cors", "trace"] }
 tracing = "0.1.44"
 tracing-log = "0.2.0"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
-uuid = { version = "1.22.0", features = ["serde", "v4"] }
+uuid = { version = "1.23.1", features = ["serde", "v4"] }
 hex = "0.4.3"
+colored = "3.1.1"
+tracing-appender = "0.2.4"
+axum-client-ip = "1.3.1"

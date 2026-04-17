@@ -3,3 +3,4 @@
 /test_files
 .env
 Cargo.lock
+/logs

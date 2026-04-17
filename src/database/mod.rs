@@ -1,11 +1,9 @@
 pub mod postgres;
 
-use std::future::Future;
+use std::{future::Future, net::IpAddr};
 use graynote_lib::types::{
     error::Error, structs::{
-        AdminUserInfoRequest, BasicAuth, CaseAccess,
-        CaseDetails, CaseInformation, NoteDetails,
-        Notes, UserInfo
+        AdminUserInfoRequest, AuthToken, BasicAuth, CaseAccess, CaseDefinition, CaseInformation, CaseStatusUpdate, NoteDetails, Notes, SessionInfo, UserInfo
     }
 };
 use jwt::TokenPieces;
@@ -40,18 +38,25 @@ use uuid::Uuid;
 ///     These methods will be protected via a custom UAC implementing token checks.
 ///
 pub trait Database {
-    fn user_exists(&self, username: &str) -> impl Future<Output = Result<bool, Error>> + Send;
-    fn get_case_information(&self, case_details: &CaseDetails) -> impl Future<Output = Result<CaseInformation, Error>> + Send;
-    fn admin_get_user_info(&self, user_info: AdminUserInfoRequest) -> impl Future<Output = Result<UserInfo, Error>> + Send;
-    fn get_case_notes(&self, case_details: &CaseDetails) -> impl Future<Output = Result<Vec<NoteDetails>, Error>> + Send;
-    fn login_basic(&self, basic_auth: &BasicAuth) -> impl Future<Output = Result<(String, Uuid), Error>> + Send;
-    fn insert_user(&self, user: UserInfo) -> impl Future<Output = Result<(), Error>> + Send;
-    fn insert_case_information(&self, case_access: CaseAccess) -> impl Future<Output = Result<Uuid, Error>> + Send;
-    fn insert_note(&self, note: &Notes) -> impl Future<Output = Result<(), Error>> + Send;
-    fn login_user(&self, token: &str) -> impl Future<Output = Result<Uuid, Error>> + Send;
-    fn add_uac_member(&self, case_number: Uuid, token: String, session_id: String, target_user: Uuid) -> impl Future<Output = Result<(), Error>> + Send;
-    fn find_accessible_cases(&self, token: String, session_id: String) -> impl Future<Output = Result<Vec<CaseInformation>, Error>> + Send;
-    fn find_accessible_notes(&self, session_id: String, token: String) -> impl Future<Output = Result<Vec<NoteDetails>, Error>> + Send;
-    fn is_access_granted(&self, session_id: &str, token: &str, case_number: &Option<Uuid>) -> impl Future<Output = Result<TokenPieces, Error>> + Send;
-    fn delete_invalid_token(&self, token: &str) -> impl Future<Output = Result<bool, Error>> + Send;
+    fn user_exists(&self, username: &str, ip_address: IpAddr) -> impl Future<Output = Result<bool, Error>> + Send;
+    fn get_case_information(&self, case_access: &CaseAccess, ip_address: IpAddr) -> impl Future<Output = Result<CaseInformation, Error>> + Send;
+    fn admin_get_user_info(&self, user_info: AdminUserInfoRequest, ip_address: IpAddr) -> impl Future<Output = Result<Option<UserInfo>, Error>> + Send;
+    fn get_case_notes(&self, case_access: &CaseAccess, ip_address: IpAddr) -> impl Future<Output = Result<Vec<NoteDetails>, Error>> + Send;
+    fn login_basic(&self, basic_auth: &BasicAuth, ip_address: IpAddr) -> impl Future<Output = Result<(TokenPieces, Uuid), Error>> + Send;
+    fn insert_user(&self, user: UserInfo, ip_address: IpAddr) -> impl Future<Output = Result<(), Error>> + Send;
+    fn insert_case_information(&self, case_definition: &CaseDefinition, ip_address: IpAddr) -> impl Future<Output = Result<Uuid, Error>> + Send;
+    fn insert_note(&self, note: &Notes, ip_address: IpAddr) -> impl Future<Output = Result<(), Error>> + Send;
+    fn authorize_user(&self, authorization_token: &TokenPieces, ip_address: IpAddr) -> impl Future<Output = Result<Uuid, Error>> + Send;
+    fn add_uac_member(&self, case_number: Option<Uuid>, note_number: Option<Uuid>, auth_token: &AuthToken, target_user: Uuid, ip_address: IpAddr) -> impl Future<Output = Result<(), Error>> + Send;
+    fn find_accessible_cases(&self, authorization_token: &AuthToken, ip_address: IpAddr) -> impl Future<Output = Result<Vec<CaseInformation>, Error>> + Send;
+    fn find_accessible_notes(&self, authorization_token: &AuthToken, ip_address: IpAddr) -> impl Future<Output = Result<Vec<NoteDetails>, Error>> + Send;
+    fn is_access_granted(&self, auth_token: &AuthToken, case_number: &Option<Uuid>, note_number: &Option<Uuid>, admin_action: bool, ip_address: IpAddr) -> impl Future<Output = Result<TokenPieces, Error>> + Send;
+    fn delete_invalid_token(&self, session_id: Uuid, ip_address: IpAddr, user_id: Uuid) -> impl Future<Output = Result<(), Error>> + Send;
+    fn admin_cycle_token(&self, admin_authorization: &AuthToken, session_id: Uuid, ip_address: IpAddr) -> impl Future<Output = Result<(), Error>> + Send;
+    fn admin_delete_user_account(&self, admin_authorization: &AuthToken, username: String, ip_address: IpAddr) -> impl Future<Output = Result<(), Error>> + Send;
+    fn delete_user_account(&self, authorization: &AuthToken, ip_address: IpAddr) -> impl Future<Output = Result<(), Error>> + Send;
+    fn cycle_token(&self, authorization: &AuthToken, ip_address: IpAddr) -> impl Future<Output = Result<(), Error>> + Send;
+    fn kill_sessions(&self, authorization: &AuthToken, ip_address: IpAddr) -> impl Future<Output = Result<(), Error>> + Send;
+    fn list_sessions(&self, authorization: &AuthToken, ip_address: IpAddr) -> impl Future<Output = Result<Vec<SessionInfo>, Error>> + Send;
+    fn update_case_status(&self, case: CaseStatusUpdate, ip_address: IpAddr) -> impl Future<Output = Result<(), Error>> + Send;
 }

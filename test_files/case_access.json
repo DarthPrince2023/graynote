@@ -1,5 +1,7 @@
 {
     "case_number": "",
-    "token": "",
-    "session_id": ""
+    "auth_token": {
+        "token": "",
+        "session_id": ""
+    }
 }
