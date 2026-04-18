@@ -11,6 +11,7 @@ use graynote_lib::types::error::Error;
 
 use crate::routes::rate_limiter::RateLimiter;
 
+pub mod caching;
 pub mod post;
 pub mod rate_limiter;
 

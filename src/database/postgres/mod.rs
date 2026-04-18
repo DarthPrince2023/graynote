@@ -2,7 +2,7 @@ use std::{env::var, net::IpAddr};
 
 use graynote_lib::types::{
     error::Error, structs::{
-        AdminUserInfoRequest, AuthToken, CaseAccess, CaseDefinition, CaseInformation, CaseStatusUpdate, LogFormatter, NoteDetails, Notes, SessionInfo, UserInfo, basic_auth::BasicAuth
+        AdminDeleteUser, AdminTokenCycleRequest, AdminUserInfoRequest, AuthToken, CaseAccess, CaseDefinition, CaseInformation, CaseStatusUpdate, LogFormatter, NoteDetails, Notes, SessionInfo, UserAccessControl, UserInfo, basic_auth::BasicAuth
     }
 };
 use argon2::Config;
@@ -24,8 +24,8 @@ const WEEKTIME_CALCULATION: i64 = 7 * 24 * 3_600;
 /// `'Postgres'` DB implementation of the `'Database'` trait
 /// 
 impl Database for Pool<Postgres> {
-    async fn user_exists(&self, username: &str, ip_address: IpAddr) -> Result<bool, Error> {
-        let mut logger = LogFormatter::new(ip_address, "00000000-0000-0000-0000-000000000000".parse::<Uuid>()?);
+    async fn user_exists(&self, username: &str, ip_address: IpAddr, request_id: Uuid) -> Result<bool, Error> {
+        let mut logger = LogFormatter::new(ip_address, "00000000-0000-0000-0000-000000000000".parse::<Uuid>()?, request_id);
 
         info!("{}", serde_json::to_string(&logger.with_message("Checking if user exists".into()).with_timestamp(Utc::now()))?);
         match sqlx::query(
@@ -52,8 +52,8 @@ impl Database for Pool<Postgres> {
         }
     }
     
-    async fn insert_user(&self, user: UserInfo, ip_address: IpAddr) -> Result<(), Error> {
-        let mut logger = LogFormatter::new(ip_address, user.user_id());
+    async fn insert_user(&self, user: UserInfo, ip_address: IpAddr, request_id: Uuid) -> Result<(), Error> {
+        let mut logger = LogFormatter::new(ip_address, user.user_id(), Uuid::new_v4());
 
         info!("{}", serde_json::to_string(&logger.with_message("Verifying user received".into()).with_timestamp(Utc::now()))?);
         if user.username().is_empty() ||
@@ -86,7 +86,7 @@ impl Database for Pool<Postgres> {
                 
                 return Err(Error::Unauthorized);
             };
-        if self.user_exists(&user.username(), ip_address).await? {
+        if self.user_exists(&user.username(), ip_address, request_id).await? {
             error!("{}", serde_json::to_string(&logger.with_message("Could not create user, handle in use".into()).with_timestamp(Utc::now()))?);
 
             return Err(Error::UserExists);
@@ -94,7 +94,8 @@ impl Database for Pool<Postgres> {
 
         info!("{}", serde_json::to_string(&logger.with_message("Attempting to insert user into table".into()).with_timestamp(Utc::now()))?);
         sqlx::query(
-            "INSERT INTO users
+            "INSERT
+                INTO users
                     (
                         user_id, username, password,
                         user_role, created_at, entry_ip
@@ -115,8 +116,8 @@ impl Database for Pool<Postgres> {
         Ok(())
     }
 
-    async fn login_basic(&self, basic_auth: &BasicAuth, ip_address: IpAddr) -> Result<(TokenPieces, Uuid), Error> {
-        let mut logger = LogFormatter::new(ip_address, "00000000-0000-0000-0000-000000000000".parse::<Uuid>()?);
+    async fn login_basic(&self, basic_auth: &BasicAuth, ip_address: IpAddr, request_id: Uuid) -> Result<(TokenPieces, Uuid), Error> {
+        let mut logger = LogFormatter::new(ip_address, "00000000-0000-0000-0000-000000000000".parse::<Uuid>()?, request_id);
 
         info!("{}", serde_json::to_string(&logger.with_message("Attempting authorization".into()).with_timestamp(Utc::now()))?);
         let user: Option<UserInfo> = sqlx::query_as(
@@ -143,7 +144,7 @@ impl Database for Pool<Postgres> {
                     return Err(Error::InvalidCredentials)
                 }
 
-                match self.authorize_user(&token, ip_address).await {
+                match self.authorize_user(&token, ip_address, request_id).await {
                     Ok(session_id) => Ok((token, session_id)),
                     Err(error) => Err(error)
                 }
@@ -156,8 +157,9 @@ impl Database for Pool<Postgres> {
         }
     }
 
-    async fn authorize_user(&self, token: &TokenPieces, ip_address: IpAddr) -> Result<Uuid, Error> {
-        let mut logger = LogFormatter::new(ip_address, token.get_payload().sub.parse::<Uuid>()?);
+    async fn authorize_user(&self, token: &TokenPieces, ip_address: IpAddr, request_id: Uuid) -> Result<Uuid, Error> {
+        let user_id = token.get_payload().sub.parse::<Uuid>()?;
+        let mut logger = LogFormatter::new(ip_address, user_id, request_id);
         let session_id = Uuid::new_v4();
 
         info!("{}", serde_json::to_string(&logger.with_message("Login successful, creating session".into()).with_timestamp(Utc::now()))?);
@@ -176,9 +178,9 @@ impl Database for Pool<Postgres> {
             "#
         )
         .bind(session_id)
-        .bind(token.get_payload().sub)
+        .bind(user_id)
         .bind(hex::encode(sha256(token.build_jwt(&var("MASTER_KEY")?)?.as_bytes().into())))
-        .bind(token.get_payload().exp)
+        .bind(DateTime::from_timestamp_secs(token.get_payload().exp))
         .bind(ip_address.to_string())
         .execute(self)
         .await
@@ -188,18 +190,18 @@ impl Database for Pool<Postgres> {
     }
 
     async fn add_uac_member(
-        &self, case_number: Option<Uuid>, note_number: Option<Uuid>, auth_token: &AuthToken, target_user: Uuid, ip_address: IpAddr
+        &self, user_access_control: UserAccessControl, ip_address: IpAddr, request_id: Uuid
     ) -> Result<(), Error> {
-        let mut logger = LogFormatter::new(ip_address, auth_token.token().get_payload().sub.parse::<Uuid>()?);
+        let mut logger = LogFormatter::new(ip_address, user_access_control.get_token().token().get_payload().sub.parse::<Uuid>()?, request_id);
 
         info!("{}", serde_json::to_string(&logger.with_message("Attempting to validate admin for request".into()).with_timestamp(Utc::now()))?);
-        self.is_access_granted(&auth_token, &None, &None, true, ip_address).await?;
+        self.is_access_granted(&user_access_control, true, ip_address, request_id).await?;
 
-        if let Some(case_number) = case_number {
+        if let Some(case_number) = user_access_control.get_case_number() {
             info!("{}", serde_json::to_string(&logger.with_message(format!("Adding user to UAC for case with identifier {case_number}")).with_timestamp(Utc::now()))?);
         }
 
-        if let Some(note_number) = note_number {
+        if let Some(note_number) = user_access_control.get_note_id() {
             info!("{}", serde_json::to_string(&logger.with_message(format!("Adding user to UAC for note with identifier {note_number}")).with_timestamp(Utc::now()))?);
         }
         sqlx::query(
@@ -216,9 +218,9 @@ impl Database for Pool<Postgres> {
             "#
         )
         .bind(Uuid::new_v4())
-        .bind(target_user)
-        .bind(case_number)
-        .bind(note_number)
+        .bind(user_access_control.get_user_id())
+        .bind(user_access_control.get_case_number())
+        .bind(user_access_control.get_note_id())
         .execute(self)
         .await
         .map_err(|error| Error::from(&error))?;
@@ -226,12 +228,14 @@ impl Database for Pool<Postgres> {
         Ok(())
     }
 
-    async fn insert_note(&self, note: &Notes, ip_address: IpAddr) -> Result<(), Error> {
-        let mut logger = LogFormatter::new(ip_address, note.auth_token().token().get_payload().sub.parse::<Uuid>()?);
+    async fn insert_note(&self, note: &Notes, ip_address: IpAddr, request_id: Uuid) -> Result<(), Error> {
+        let user_id = note.auth_token().token().get_payload().sub.parse::<Uuid>()?;
+        let mut logger = LogFormatter::new(ip_address, user_id, request_id);
         
         info!("{}", serde_json::to_string(&logger.with_message("Checking if user is authorized to insert note".into()).with_timestamp(Utc::now()))?);
         let note_details = &note.note_details();
-        let pieces: TokenPieces = self.is_access_granted(&note.auth_token(),&Some(note_details.case_number()), &None, false, ip_address).await?;
+        let user_access_control = UserAccessControl::new(user_id, Some(note_details.case_number()), None, note.auth_token())?;
+        self.is_access_granted(&user_access_control, false, ip_address, request_id).await?;
 
         query(
             r#"
@@ -251,7 +255,7 @@ impl Database for Pool<Postgres> {
                 "#
         )
             .bind(Uuid::new_v4())
-            .bind(Uuid::parse_str(pieces.get_payload().sub.as_str())?)
+            .bind(user_id)
             .bind(note_details.note_text())
             .bind(note_details.relevant_media())
             .bind(note_details.entry_timestamp())
@@ -264,13 +268,15 @@ impl Database for Pool<Postgres> {
         Ok(())
     }
 
-    async fn insert_case_information(&self, case_definition: &CaseDefinition, ip_address: IpAddr) -> Result<Uuid, Error> {
+    async fn insert_case_information(&self, case_definition: &CaseDefinition, ip_address: IpAddr, request_id: Uuid) -> Result<Uuid, Error> {
+        let user_id = case_definition.auth_token().token().get_payload().sub.parse::<Uuid>()?;
+        let mut logger = LogFormatter::new(ip_address, user_id, request_id);
         let case_number = Uuid::new_v4();
         let case_information = case_definition.case_information();
-        let mut logger = LogFormatter::new(ip_address, case_definition.auth_token().token().get_payload().sub.parse::<Uuid>()?);
 
         info!("{}", serde_json::to_string(&logger.with_message(format!("Checking permissions for creating case with identifier of {case_number}")).with_timestamp(Utc::now()))?);
-        self.is_access_granted(&case_definition.auth_token(), &None, &None, false, ip_address).await?;
+        let user_access_control = UserAccessControl::new(user_id, None, None, case_definition.auth_token())?;
+        self.is_access_granted(&user_access_control, false, ip_address, request_id).await?;
 
         info!("{}", serde_json::to_string(&logger.with_message(format!("Attempting to create case with identifier {case_number}")).with_timestamp(Utc::now()))?);
         let (case_id,): (Uuid,) = sqlx::query_as(
@@ -307,7 +313,7 @@ impl Database for Pool<Postgres> {
             "#
         )
             .bind(case_number)
-            .bind(case_definition.auth_token().token().get_payload().sub)
+            .bind(user_id)
             .bind(case_information.suspect_name())
             .bind(case_information.suspect_aliases())
             .bind(case_information.suspect_description())
@@ -327,11 +333,13 @@ impl Database for Pool<Postgres> {
         Ok(case_id)
     } 
 
-    async fn get_case_information(&self, case_details: &CaseAccess, ip_address: IpAddr) -> Result<CaseInformation, Error> {
-        let mut logger = LogFormatter::new(ip_address, case_details.auth_token().token().get_payload().sub.parse::<Uuid>()?);
+    async fn get_case_information(&self, case_details: &CaseAccess, ip_address: IpAddr, request_id: Uuid) -> Result<CaseInformation, Error> {
+        let user_id = case_details.auth_token().token().get_payload().sub.parse::<Uuid>()?;
+        let mut logger = LogFormatter::new(ip_address, user_id, request_id);
 
         info!("{}", serde_json::to_string(&logger.with_message("Checking if user has access to view case".into()).with_timestamp(Utc::now()))?);
-        let pieces: TokenPieces = self.is_access_granted(case_details.auth_token(),&Some(case_details.case_number()), &None, false, ip_address).await?;
+        let user_access_control = UserAccessControl::new(user_id, Some(case_details.case_number()), None, case_details.auth_token().clone())?;
+        self.is_access_granted(&user_access_control,false, ip_address, request_id).await?;
         
         sqlx::query_as(
             r#"
@@ -354,19 +362,21 @@ impl Database for Pool<Postgres> {
                 AND c.case_number = $2::uuid;
             "#
         )
-        .bind(pieces.get_payload().sub)
+        .bind(user_id)
         .bind(case_details.case_number())
         .fetch_one(self)
         .await
         .map_err(|error| Error::from(&error.into()))
     }
 
-    async fn get_case_notes(&self, case_access: &CaseAccess, ip_address: IpAddr) -> Result<Vec<NoteDetails>, Error> {
-        let mut logger = LogFormatter::new(ip_address, case_access.auth_token().token().get_payload().sub.parse::<Uuid>()?);
+    async fn get_case_notes(&self, case_access: &CaseAccess, ip_address: IpAddr, request_id: Uuid) -> Result<Vec<NoteDetails>, Error> {
+        let user_id: Uuid = case_access.auth_token().token().get_payload().sub.parse()?;
+        let mut logger = LogFormatter::new(ip_address, user_id, request_id);
 
         info!("{}", serde_json::to_string(&logger.with_message("Verifying is user is authorized to access requested resource".into()).with_timestamp(Utc::now()))?);
-        let pieces: TokenPieces = self.is_access_granted(case_access.auth_token(), &Some(case_access.case_number()), &None, false, ip_address).await?;
-
+        let user_access_control = UserAccessControl::new(user_id, Some(case_access.case_number()), None, case_access.auth_token().clone())?;
+        self.is_access_granted(&user_access_control, false, ip_address, request_id).await?;
+        
         sqlx::query_as(
                 r#"
                     SELECT n.note_id,
@@ -384,18 +394,20 @@ impl Database for Pool<Postgres> {
                     DESC;
                 "#
             )
-            .bind(pieces.get_payload().sub.as_str())
+            .bind(user_id)
             .bind(case_access.case_number())
             .fetch_all(self)
             .await
             .map_err(|error| Error::from(&error.into()))
     }
 
-    async fn find_accessible_cases(&self, authorization_token: &AuthToken, ip_address: IpAddr) -> Result<Vec<CaseInformation>, Error> {
-        let mut logger = LogFormatter::new(ip_address, authorization_token.token().get_payload().sub.parse::<Uuid>()?);
+    async fn find_accessible_cases(&self, authorization_token: &AuthToken, ip_address: IpAddr, request_id: Uuid) -> Result<Vec<CaseInformation>, Error> {
+        let user_id = authorization_token.token().get_payload().sub.parse::<Uuid>()?;
+        let mut logger = LogFormatter::new(ip_address, user_id, request_id);
 
         info!("{}", serde_json::to_string(&logger.with_message("Verifying if user is authorized to access requested resource".into()).with_timestamp(Utc::now()))?);
-        let has_access: TokenPieces = self.is_access_granted(authorization_token, &None, &None, false, ip_address).await?;
+        let user_access_control = UserAccessControl::new(user_id, None, None, authorization_token.clone())?;
+        self.is_access_granted(&user_access_control, false, ip_address, request_id).await?;
 
         sqlx::query_as(
             r#"
@@ -417,17 +429,19 @@ impl Database for Pool<Postgres> {
             WHERE uac.user_id = $1;
             "#
         )
-        .bind(has_access.get_payload().sub)
+        .bind(user_id)
         .fetch_all(self)
         .await
         .map_err(|error| Error::from(&error.into()))
     }
 
-    async fn admin_get_user_info(&self, user_info: AdminUserInfoRequest, ip_address: IpAddr) -> Result<Option<UserInfo>, Error> {
-        let mut logger = LogFormatter::new(ip_address, user_info.admin_authorization().token().get_payload().sub.parse::<Uuid>()?);
+    async fn admin_get_user_info(&self, user_info: AdminUserInfoRequest, ip_address: IpAddr, request_id: Uuid) -> Result<Option<UserInfo>, Error> {
+        let user_id: Uuid = user_info.admin_authorization().token().get_payload().sub.parse()?;
+        let mut logger = LogFormatter::new(ip_address, user_id, request_id);
 
         info!("{}", serde_json::to_string(&logger.with_message("Verifying admin access".into()).with_timestamp(Utc::now()))?);
-        self.is_access_granted(&user_info.admin_authorization(), &None, &None, true, ip_address).await?;
+        let user_access_control = UserAccessControl::new(user_id, None, None, user_info.admin_authorization())?;
+        self.is_access_granted(&user_access_control, true, ip_address, request_id).await?;
 
         info!("{}", serde_json::to_string(&logger.with_message("Performing database lookup of user".into()).with_timestamp(Utc::now()))?);
         sqlx::query_as(
@@ -443,11 +457,13 @@ impl Database for Pool<Postgres> {
             .map_err(|error| Error::from(&error.into()))
     }
 
-    async fn find_accessible_notes(&self, authorization_token: &AuthToken, ip_address: IpAddr) -> Result<Vec<NoteDetails>, Error> {  
-        let mut logger = LogFormatter::new(ip_address, authorization_token.token().get_payload().sub.parse::<Uuid>()?);
+    async fn find_accessible_notes(&self, authorization_token: &AuthToken, ip_address: IpAddr, request_id: Uuid) -> Result<Vec<NoteDetails>, Error> {
+        let user_id: Uuid = authorization_token.token().get_payload().sub.parse()?;
+        let mut logger = LogFormatter::new(ip_address, user_id, request_id);
 
-        info!("{}", serde_json::to_string(&logger.with_message("Verifying authorization for access".into()).with_timestamp(Utc::now()))?);    
-        let user: TokenPieces = self.is_access_granted(authorization_token, &None, &None, false, ip_address).await?;
+        info!("{}", serde_json::to_string(&logger.with_message("Verifying authorization for access".into()).with_timestamp(Utc::now()))?); 
+        let user_access_control = UserAccessControl::new(user_id, None, None, authorization_token.clone())?;
+        self.is_access_granted(&user_access_control, false, ip_address, request_id).await?;
 
         info!("{}", serde_json::to_string(&logger.with_message("Retrieving accessible notes for user".into()).with_timestamp(Utc::now()))?);
         sqlx::query_as(
@@ -464,14 +480,14 @@ impl Database for Pool<Postgres> {
             WHERE uac.user_id = $1;
             "#
         )
-        .bind(user.get_payload().sub)
+        .bind(user_id)
         .fetch_all(self)
         .await
         .map_err(|error| Error::from(&error.into()))
     }
 
-    async fn delete_invalid_token(&self, session_id: Uuid, ip_address: IpAddr, user_id: Uuid) -> Result<(), Error> {
-        let mut logger = LogFormatter::new(ip_address, user_id);
+    async fn delete_invalid_token(&self, session_id: Uuid, ip_address: IpAddr, user_id: Uuid, request_id: Uuid) -> Result<(), Error> {
+        let mut logger = LogFormatter::new(ip_address, user_id, request_id);
 
         info!("{}", serde_json::to_string(&logger.with_message("Deleting invalid token automatically, if it exists".into()).with_timestamp(Utc::now()))?);
         sqlx::query(
@@ -489,11 +505,13 @@ impl Database for Pool<Postgres> {
         Ok(())
     }
 
-    async fn admin_cycle_token(&self, admin_authorization: &AuthToken, session_id: Uuid, ip_address: IpAddr) -> Result<(), Error> {
-        let mut logger = LogFormatter::new(ip_address, admin_authorization.token().get_payload().sub.parse::<Uuid>()?);
+    async fn admin_cycle_token(&self, admin_token_cycle_request: AdminTokenCycleRequest, ip_address: IpAddr, request_id: Uuid) -> Result<(), Error> {
+        let user_id = admin_token_cycle_request.admin_authorization().token().get_payload().sub.parse::<Uuid>()?;
+        let mut logger = LogFormatter::new(ip_address, user_id, request_id);
 
         info!("{}", serde_json::to_string(&logger.with_message("Verifying admin authorization request".into()).with_timestamp(Utc::now()))?);
-        let _ = self.is_access_granted(&admin_authorization, &None, &None, true, ip_address).await?;
+        let user_access_control = UserAccessControl::new(user_id, None, None, admin_token_cycle_request.admin_authorization())?;
+        self.is_access_granted(&user_access_control, true, ip_address, request_id).await?;
 
         info!("{}", serde_json::to_string(&logger.with_message("Deleting token, if it exists".into()).with_timestamp(Utc::now()))?);
         sqlx::query(
@@ -503,7 +521,7 @@ impl Database for Pool<Postgres> {
                 WHERE session_id = $1;
             "#
         )
-        .bind(session_id)
+        .bind(admin_token_cycle_request.session_id())
         .execute(self)
         .await
         .map_err(|error| Error::from(&error.into()))?;
@@ -511,14 +529,15 @@ impl Database for Pool<Postgres> {
         Ok(())
     }
 
-    async fn is_access_granted(&self, auth_token: &AuthToken, case_number: &Option<Uuid>, note_number: &Option<Uuid>, admin_action: bool, ip_address: IpAddr) -> Result<TokenPieces, Error> {
+    async fn is_access_granted(&self, user_access_control: &UserAccessControl, admin_action: bool, ip_address: IpAddr, request_id: Uuid) -> Result<TokenPieces, Error> {
         let master_key = var("MASTER_KEY")?;
-        let token_string = auth_token.token().build_jwt(&master_key)?;
-        let token = auth_token.token().verify_jwt(&master_key, &token_string)?;
+        let token_string = user_access_control.get_token().token().build_jwt(&master_key)?;
+        let token = user_access_control.get_token().token().verify_jwt(&master_key, &token_string)?;
         let payload = token.get_payload();
-        let mut logger = LogFormatter::new(ip_address, auth_token.token().get_payload().sub.parse::<Uuid>()?);
+        let mut logger = LogFormatter::new(ip_address, user_access_control.get_user_id(), request_id);
+        let user_id = Uuid::parse_str(&payload.sub)?;
 
-        if admin_action && !is_admin_granted(auth_token.token().to_owned(), ip_address)? {
+        if admin_action && !is_admin_granted(&token, ip_address, request_id)? {
             error!("{}", serde_json::to_string(&logger.with_message("Unauthorized admin attempt".into()).with_timestamp(Utc::now()))?);
 
             return Err(Error::Unauthorized)
@@ -537,7 +556,7 @@ impl Database for Pool<Postgres> {
             // Token is not valid, delete it to declutter the table.
             error!("{}", serde_json::to_string(&logger.with_message("Token not valid".into()).with_timestamp(Utc::now()))?);
 
-            self.delete_invalid_token(auth_token.session_id(), ip_address, token.get_payload().sub.parse::<Uuid>()?).await?;
+            self.delete_invalid_token(user_access_control.get_token().session_id(), ip_address, user_id, request_id).await?;
 
             return Err(Error::JwtError);
         }
@@ -561,10 +580,10 @@ impl Database for Pool<Postgres> {
                 LIMIT 1;
             "#
         )
-            .bind(Uuid::parse_str(&payload.sub)?)
-            .bind(Uuid::parse_str(&auth_token.session_id().to_string())?)
-            .bind(case_number)
-            .bind(note_number)
+            .bind(user_id)
+            .bind(Uuid::parse_str(&user_access_control.get_token().session_id().to_string())?)
+            .bind(user_access_control.get_case_number())
+            .bind(user_access_control.get_note_id())
             .fetch_optional(self)
             .await {
                 Ok(Some(id)) => {
@@ -598,11 +617,13 @@ impl Database for Pool<Postgres> {
         Ok(token)
     }
     
-    async fn admin_delete_user_account(&self, admin_authorization: &AuthToken, username: String, ip_address: IpAddr) -> Result<(), Error> {
-        let mut logger = LogFormatter::new(ip_address, admin_authorization.token().get_payload().sub.parse::<Uuid>()?);
+    async fn admin_delete_user_account(&self, admin_delete_user: AdminDeleteUser, ip_address: IpAddr, request_id: Uuid) -> Result<(), Error> {
+        let user_id = admin_delete_user.admin_authorization().token().get_payload().sub.parse::<Uuid>()?;
+        let mut logger = LogFormatter::new(ip_address, user_id, request_id);
 
-        info!("{}", serde_json::to_string(&logger.with_message("Checking permissions for deleting user account".into()).with_timestamp(Utc::now()))?);
-        self.is_access_granted(&admin_authorization, &None, &None, true, ip_address).await?;
+        info!("{}", serde_json::to_string(&logger.with_message("Verifying admin authorization request".into()).with_timestamp(Utc::now()))?);
+        let user_access_control = UserAccessControl::new(user_id, None, None, admin_delete_user.admin_authorization())?;
+        self.is_access_granted(&user_access_control, true, ip_address, request_id).await?;
 
         sqlx::query(r#"
             WITH deleted_user AS (
@@ -622,7 +643,7 @@ impl Database for Pool<Postgres> {
                 WHERE user_id IN (SELECT user_id FROM deleted_user)
             );
         "#)
-        .bind(username)
+        .bind(admin_delete_user.username())
         .execute(self)
         .await
         .map_err(|error| Error::from(&error.into()))?;
@@ -630,11 +651,13 @@ impl Database for Pool<Postgres> {
         Ok(())
     }
     
-    async fn delete_user_account(&self, authorization: &AuthToken, ip_address: IpAddr) -> Result<(), Error> {
-        let mut logger = LogFormatter::new(ip_address, authorization.token().get_payload().sub.parse::<Uuid>()?);
+    async fn delete_user_account(&self, authorization: &AuthToken, ip_address: IpAddr, request_id: Uuid) -> Result<(), Error> {
+        let user_id = authorization.token().get_payload().sub.parse::<Uuid>()?;
+        let mut logger = LogFormatter::new(ip_address, user_id, request_id);
 
         info!("{}", serde_json::to_string(&logger.with_message("Checking permissions for deleting user account".into()).with_timestamp(Utc::now()))?);
-        self.is_access_granted(&authorization, &None, &None, false, ip_address).await?;
+        let user_access_control = UserAccessControl::new(user_id, None, None, authorization.clone())?;
+        self.is_access_granted(&user_access_control, false, ip_address, request_id).await?;
 
         sqlx::query(r#"
             WITH deleted_user AS (
@@ -662,11 +685,13 @@ impl Database for Pool<Postgres> {
         Ok(())
     }
     
-    async fn cycle_token(&self, authorization: &AuthToken, ip_address: IpAddr) -> Result<(), Error> {
-        let mut logger = LogFormatter::new(ip_address, authorization.token().get_payload().sub.parse::<Uuid>()?);
+    async fn cycle_token(&self, authorization: &AuthToken, ip_address: IpAddr, request_id: Uuid) -> Result<(), Error> {
+        let user_id = authorization.token().get_payload().sub.parse::<Uuid>()?;
+        let mut logger = LogFormatter::new(ip_address, user_id, request_id);
 
         info!("{}", serde_json::to_string(&logger.with_message("Checking permissions to cycle token".into()).with_timestamp(Utc::now()))?);
-        self.is_access_granted(&authorization, &None, &None, false, ip_address).await?;
+        let user_access_control = UserAccessControl::new(user_id, None, None, authorization.clone())?;
+        self.is_access_granted(&user_access_control, false, ip_address, request_id).await?;
         
         info!("{}", serde_json::to_string(&logger.with_message("Deleting token, if it exists".into()).with_timestamp(Utc::now()))?);
         sqlx::query(
@@ -684,11 +709,13 @@ impl Database for Pool<Postgres> {
         Ok(())
     }
     
-    async fn kill_sessions(&self, authorization: &AuthToken, ip_address: IpAddr) -> Result<(), Error> {
-        let mut logger = LogFormatter::new(ip_address, authorization.token().get_payload().sub.parse::<Uuid>()?);
+    async fn kill_sessions(&self, authorization: &AuthToken, ip_address: IpAddr, request_id: Uuid) -> Result<(), Error> {
+        let user_id = authorization.token().get_payload().sub.parse::<Uuid>()?;
+        let mut logger = LogFormatter::new(ip_address, user_id, request_id);
 
         info!("{}", serde_json::to_string(&logger.with_message("Checking permissions to cycle tokens".into()).with_timestamp(Utc::now()))?);
-        self.is_access_granted(&authorization, &None, &None, false, ip_address).await?;
+        let user_access_control = UserAccessControl::new(user_id, None, None, authorization.clone())?;
+        self.is_access_granted(&user_access_control, false, ip_address, request_id).await?;
         
         info!("{}", serde_json::to_string(&logger.with_message("Deleting tokens".into()).with_timestamp(Utc::now()))?);
         sqlx::query(
@@ -700,7 +727,7 @@ impl Database for Pool<Postgres> {
             "#
         )
         .bind(authorization.session_id())
-        .bind(authorization.token().get_payload().sub.parse::<Uuid>()?)
+        .bind(user_id)
         .execute(self)
         .await
         .map_err(|error| Error::from(&error.into()))?;
@@ -708,35 +735,37 @@ impl Database for Pool<Postgres> {
         Ok(())
     }
     
-    async fn list_sessions(&self, authorization: &AuthToken, ip_address: IpAddr) -> Result<Vec<SessionInfo>, Error> {
-        let mut logger = LogFormatter::new(ip_address, authorization.token().get_payload().sub.parse::<Uuid>()?);
+    async fn list_sessions(&self, authorization: &AuthToken, ip_address: IpAddr, request_id: Uuid) -> Result<Vec<SessionInfo>, Error> {
+        let user_id = authorization.token().get_payload().sub.parse::<Uuid>()?;
+        let mut logger = LogFormatter::new(ip_address, user_id, request_id);
 
         info!("{}", serde_json::to_string(&logger.with_message("Checking permissions to list active sessions".into()).with_timestamp(Utc::now()))?);
-        self.is_access_granted(&authorization, &None, &None, false, ip_address).await?;
+        let user_access_control = UserAccessControl::new(user_id, None, None, authorization.clone())?;
+        self.is_access_granted(&user_access_control, false, ip_address, request_id).await?;
         
         sqlx::query_as(r#"
-           WITH user_id_selected AS (
-                SELECT user_id
-                FROM users
-                WHERE username = $1
-            ) 
             SELECT session_id,
                 expires_at,
                 ip_address
             FROM auth_session
-            WHERE user_id IN (SELECT user_id FROM user_id_selected);
+            WHERE user_id = $1;
         "#)
-        .bind(authorization.token().get_payload().username())
+        .bind(user_id)
         .fetch_all(self)
         .await
-        .map_err(|error| Error::from(&error.into()))
+        .map_err(|error| {
+            error!("Error in database => {error:?}");
+            Error::from(&error.into())
+        })
     }
     
-    async fn update_case_status(&self, case: CaseStatusUpdate, ip_address: IpAddr) -> Result<(), Error> {
-        let mut logger = LogFormatter::new(ip_address, case.case().auth_token().token().get_payload().sub.parse::<Uuid>()?);
+    async fn update_case_status(&self, case: CaseStatusUpdate, ip_address: IpAddr, request_id: Uuid) -> Result<(), Error> {
+        let user_id = case.case().auth_token().token().get_payload().sub.parse::<Uuid>()?;
+        let mut logger = LogFormatter::new(ip_address, user_id, request_id);
 
         info!("{}", serde_json::to_string(&logger.with_message("Checking permissions to update case status".into()).with_timestamp(Utc::now()))?);
-        self.is_access_granted(&case.case().auth_token(), &None, &None, false, ip_address).await?;
+        let user_access_control = UserAccessControl::new(user_id, Some(case.case().case_number()), None, case.case().auth_token().clone())?;
+        self.is_access_granted(&user_access_control, false, ip_address, request_id).await?;
 
         sqlx::query(r#"
             UPDATE cases
@@ -753,8 +782,8 @@ impl Database for Pool<Postgres> {
     }
 }
 
-pub fn is_admin_granted(authorization: TokenPieces, ip_address: IpAddr) -> Result<bool, Error> {
-    let mut logger = LogFormatter::new(ip_address, authorization.get_payload().sub.parse::<Uuid>()?);
+pub fn is_admin_granted(authorization: &TokenPieces, ip_address: IpAddr, request_id: Uuid) -> Result<bool, Error> {
+    let mut logger = LogFormatter::new(ip_address, authorization.get_payload().sub.parse::<Uuid>()?, request_id);
     let allowed_admins = var("DESIGNATED_ADMIN_USERS")?;
     let allowed_admins: Vec<&str> = allowed_admins.split(",").collect();
 
