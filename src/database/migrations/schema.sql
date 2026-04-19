@@ -38,11 +38,12 @@ CREATE TABLE IF NOT EXISTS cases (
 CREATE TABLE IF NOT EXISTS notes (
     note_id UUID PRIMARY KEY,
     case_number UUID NOT NULL,
-    author_id UUID,
+    user_id UUID,
     note_text TEXT NOT NULL,
     relevant_media TEXT [],
     entry_timestamp TIMESTAMPTZ DEFAULT now(),
     entry_ip TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(user_id),
     FOREIGN KEY (case_number) REFERENCES cases(case_number)
 );
 
@@ -50,10 +51,15 @@ CREATE TABLE IF NOT EXISTS notes (
 -- With the UAC table, you can grant access to certain cases, notes, or just store tokens for users.
 -- Store the token signature, so we don't have any replication issues.
 CREATE TABLE IF NOT EXISTS user_access_control (
-    param_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    policy_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL,
     case_number UUID,
-    note_id UUID
+    note_id UUID,
+    entry_ip TEXT,
+    entry_timestamp TIMESTAMPTZ DEFAULT now(),
+    FOREIGN KEY (case_number) REFERENCES cases(case_number),
+    FOREIGN KEY (user_id) REFERENCES users(user_id),
+    FOREIGN KEY (note_id) REFERENCES notes(note_id)
 );
 
 -- Auth session table
@@ -62,5 +68,6 @@ CREATE TABLE IF NOT EXISTS auth_session (
     user_id UUID NOT NULL,
     token_hash TEXT NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
-    ip_address TEXT NOT NULL
+    ip_address TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
 );

@@ -6,7 +6,7 @@ use chrono::Utc;
 use dotenvy::var;
 use graynote_lib::types::{
     error::Error, structs::{
-        AdminDeleteUser, AdminTokenCycleRequest, AdminUserInfoRequest, AuthToken, Authorization, BasicAuth, CaseAccess, CaseDefinition, CaseInformation, CaseStatusUpdate, LogFormatter, NoteDetails, Notes, UserInfo, UserAccessControl
+        AdminDeleteUser, AdminTokenCycleRequest, AdminUserInfoRequest, AuthToken, Authorization, BasicAuth, CaseAccess, CaseDefinition, CaseInformation, CaseStatusUpdate, DeleteUacPolicy, LogFormatter, NoteContext, NoteDetails, UserAccessControlDefinition, UserAccessControlFilter, UserAccessControlPolicy, UserInfo
     }
 };
 use serde_json::{Value, json};
@@ -46,7 +46,7 @@ pub async fn fetch_user_info_admin(State(shared_state): State<SharedState>, Clie
 }
 
 #[tracing::instrument(skip(shared_state, user_access_control, ip), name = "ADD MEMBER USER ACCESS CONTROL")]
-pub async fn add_uac_member(State(shared_state): State<SharedState>, ClientIp(ip): ClientIp, Json(user_access_control): Json<UserAccessControl>) -> Result<Json<Value>, Error> {
+pub async fn add_uac_member(State(shared_state): State<SharedState>, ClientIp(ip): ClientIp, Json(user_access_control): Json<UserAccessControlDefinition>) -> Result<Json<Value>, Error> {
     let request_id = Uuid::new_v4();
     let mut logger = LogFormatter::new(ip, user_access_control.get_token().token().get_payload().sub.parse::<Uuid>()?, request_id);
 
@@ -60,8 +60,6 @@ pub async fn add_uac_member(State(shared_state): State<SharedState>, ClientIp(ip
 
     Ok(Json(json!({"message":"Added user access to case"})))
 }
-
-
 
 #[tracing::instrument(skip(shared_state, user, ip), name = "ADMIN DELETE USER ACCOUNT")]
 pub async fn admin_delete_user(State(shared_state): State<SharedState>, ClientIp(ip): ClientIp, Json(user): Json<AdminDeleteUser>) -> Result<Json<Value>, Error> {
@@ -108,8 +106,11 @@ pub async fn create_user(State(mut state): State<SharedState>, ClientIp(ip): Cli
         return Err(Error::RateLimitExceeded);
     }
 
+    info!("{}", serde_json::to_string(&logger.with_message("Checking cache for username".into()).with_timestamp(Utc::now()))?);
+    let exists = state.username_cache.entry(user.username()).or_insert(Uuid::new_v4()).await.is_fresh();
+
     info!("{}", serde_json::to_string(&logger.with_message("Attempting to creater user".into()).with_timestamp(Utc::now()))?);
-    state.postgres_pool.insert_user(user, ip, request_id).await?;
+    state.postgres_pool.insert_user(user, ip, request_id, exists).await?;
 
     info!("{}", serde_json::to_string(&logger.with_message("Created user successfully".into()).with_timestamp(Utc::now()))?);
 
@@ -257,7 +258,8 @@ pub async fn update_case_status(State(shared_state): State<SharedState>, ClientI
 #[tracing::instrument(skip(shared_state, case, ip), name = "GET CASE INFORMATION")]
 pub async fn get_case_information(State(shared_state): State<SharedState>, ClientIp(ip): ClientIp, Json(case): Json<CaseAccess>) -> Result<Json<CaseInformation>, Error> {
     let request_id = Uuid::new_v4();
-    let mut logger = LogFormatter::new(ip, case.auth_token().token().get_payload().sub.parse::<Uuid>()?, request_id);
+    let user_id = case.auth_token().token().get_payload().sub.parse::<Uuid>()?;
+    let mut logger = LogFormatter::new(ip, user_id, request_id);
     let logger = logger
         .with_case_number(Some(case.case_number()));
 
@@ -267,30 +269,160 @@ pub async fn get_case_information(State(shared_state): State<SharedState>, Clien
     info!("{}", serde_json::to_string(&logger.with_message("Rate limit checking".into()).with_timestamp(Utc::now()))?);
     rate_limit_check(shared_state.clone(), case.auth_token(), ip).await?;
 
-    info!("{}", serde_json::to_string(&logger.with_message("Attempting to retrieve information about case".into()).with_timestamp(Utc::now()))?);
-    let case_info = shared_state.postgres_pool.get_case_information(&case, ip, request_id).await?;
+    info!("{}", serde_json::to_string(&logger.with_message("Checking if user has access to case to fetch information".into()).with_timestamp(Utc::now()))?);
+    let user_access_control = UserAccessControlDefinition::new(user_id, Some(case.case_number()), None, case.auth_token().clone())?;
+    shared_state.postgres_pool.is_access_granted(&user_access_control, false, ip, request_id).await?;
 
-    info!("{}", serde_json::to_string(&logger.with_message("Retrieved information for case".into()).with_timestamp(Utc::now()))?);
+    info!("{}", serde_json::to_string(&logger.with_message("Checking cache for case information".into()).with_timestamp(Utc::now()))?);
+    let case_info_existed = shared_state.case_details_cache.contains_key(&case.case_number());
 
-    Ok(Json(case_info))
+    if !case_info_existed {
+        info!("{}", serde_json::to_string(&logger.with_message("Fetching cache for case information".into()).with_timestamp(Utc::now()))?);
+        let case_information = shared_state.case_information_cache.entry(case.case_number()).or_default().await.into_value();
+
+        info!("{}", serde_json::to_string(&logger.with_message("Retrieved information for case".into()).with_timestamp(Utc::now()))?);
+
+        Ok(Json(case_information))
+    } else {
+        info!("{}", serde_json::to_string(&logger.with_message("Attempting to retrieve information about case".into()).with_timestamp(Utc::now()))?);
+        let case_information = shared_state.postgres_pool.get_case_information(&case, ip, request_id).await?;
+
+        info!("{}", serde_json::to_string(&logger.with_message("Caching information about case".into()).with_timestamp(Utc::now()))?);
+        shared_state.case_information_cache.insert(case_information.case_number(), case_information.clone()).await;
+
+        Ok(Json(case_information))
+    }
+
+    
 }
 
 #[tracing::instrument(skip(shared_state, case, ip), name = "GET CASE NOTES")]
 pub async fn get_case_notes(State(shared_state): State<SharedState>, ClientIp(ip): ClientIp, Json(case): Json<CaseAccess>) -> Result<Json<Vec<NoteDetails>>, Error> {
     let request_id = Uuid::new_v4();
-    let mut logger = LogFormatter::new(ip, case.auth_token().token().get_payload().sub.parse::<Uuid>()?, request_id);
+    let user_id = case.auth_token().token().get_payload().sub.parse::<Uuid>()?;
+    let mut logger = LogFormatter::new(ip, user_id, request_id);
     let logger = logger
         .with_case_number(Some(case.case_number()));
 
     info!("{}", serde_json::to_string(&logger.with_message("Rate limit checking".into()).with_timestamp(Utc::now()))?);
     rate_limit_check(shared_state.clone(), case.auth_token(), ip).await?;
+    
+    info!("{}", serde_json::to_string(&logger.with_message("Checking if user has access to case to retrieve notes".into()).with_timestamp(Utc::now()))?);
+    let user_access_control = UserAccessControlDefinition::new(user_id, Some(case.case_number()), None, case.auth_token().clone())?;
+    shared_state.postgres_pool.is_access_granted(&user_access_control, false, ip, request_id).await?;
 
-    info!("{}", serde_json::to_string(&logger.with_message("Attempting to retrieve notes for case".into()).with_timestamp(Utc::now()))?);
-    let case_notes = shared_state.postgres_pool.get_case_notes(&case, ip, request_id).await?;
+    info!("{}", serde_json::to_string(&logger.with_message("Checking cache for case notes".into()).with_timestamp(Utc::now()))?);
+    let notes_exist = shared_state.case_details_cache.contains_key(&case.case_number());
+
+    if notes_exist {
+        info!("{}", serde_json::to_string(&logger.with_message("Note found in cache".into()).with_timestamp(Utc::now()))?);
+        
+        let notes = shared_state.case_details_cache.entry(case.case_number()).or_default().await.into_value().1;
+        
+        info!("{}", serde_json::to_string(&logger.with_message("Retrieved notes for case".into()).with_timestamp(Utc::now()))?);
     
-    info!("{}", serde_json::to_string(&logger.with_message("Retrieved notes for case".into()).with_timestamp(Utc::now()))?);
+        Ok(Json(notes))
+    } else {
+        info!("{}", serde_json::to_string(&logger.with_message("No notes found in cache for case, attempting to retrieve notes for case from database".into()).with_timestamp(Utc::now()))?);
+        
+        let case_details = shared_state.postgres_pool.get_case_details(&case, ip, request_id).await?;
+        shared_state.case_details_cache.insert(case.case_number(), case_details.clone()).await;
+        
+        info!("{}", serde_json::to_string(&logger.with_message("Retrieved notes for case".into()).with_timestamp(Utc::now()))?);
     
-    Ok(Json(case_notes))
+        Ok(Json(case_details.1))
+    }
+}
+
+#[tracing::instrument(skip(shared_state, request, ip), name = "GET USER ACCESS CONTROL POLICIES")]
+pub async fn get_user_access_control_policies(State(shared_state): State<SharedState>, ClientIp(ip): ClientIp, Json(request): Json<UserAccessControlFilter>) -> Result<Json<Vec<UserAccessControlPolicy>>, Error> {
+    let request_id = Uuid::new_v4();
+    let user_id = request.authorization().token().get_payload().sub.parse::<Uuid>()?;
+    let mut logger = LogFormatter::new(ip, user_id, request_id);
+
+    info!("{}", serde_json::to_string(&logger.with_message("Rate limit checking".into()).with_timestamp(Utc::now()))?);
+    rate_limit_check(shared_state.clone(), &request.authorization(), ip).await?;
+
+    info!("{}", serde_json::to_string(&logger.with_message("Checking if user has access to get policies".into()).with_timestamp(Utc::now()))?);
+    let user_access_control = UserAccessControlDefinition::new(user_id, None, None, request.authorization())?;
+    shared_state.postgres_pool.is_access_granted(&user_access_control, false, ip, request_id).await?;
+
+    if shared_state.case_details_cache.entry_count() > 0 {
+        info!("{}", serde_json::to_string(&logger.with_message("Retrieving cached policies".into()).with_timestamp(Utc::now()))?);
+        let mut uac_policies: Vec<UserAccessControlPolicy> = Vec::new();
+        shared_state.user_access_control_policy_cache.into_iter().for_each(|policy| uac_policies.push(policy.1));
+
+        info!("{}", serde_json::to_string(&logger.with_message("Retrieved cached policies".into()).with_timestamp(Utc::now()))?);
+
+        Ok(Json(uac_policies))
+    } else {
+        info!("{}", serde_json::to_string(&logger.with_message("Policies not found in cache, checking database".into()).with_timestamp(Utc::now()))?);
+        let details = shared_state.postgres_pool.get_uac_policies(request, ip, request_id).await?;
+
+        for policy in details.clone() {
+            let Some(policy_id) = policy.policy_id() else {
+                error!("{}", serde_json::to_string(&logger.with_message("Policy ID unavailable".into()).with_timestamp(Utc::now()))?);
+
+                return Err(Error::DatabaseError)
+            };
+
+            shared_state.user_access_control_policy_cache.insert(policy_id, policy.clone()).await;
+        }
+
+        info!("{}", serde_json::to_string(&logger.with_message("Fetched case details".into()).with_timestamp(Utc::now()))?);
+
+        Ok(Json(details))
+    }
+}
+
+#[tracing::instrument(skip(shared_state, request, ip), name = "REVOKE USER ACCESS CONTROL POLICY")]
+pub async fn revoke_user_access_control_policy(State(shared_state): State<SharedState>, ClientIp(ip): ClientIp, Json(request): Json<DeleteUacPolicy>) -> Result<Json<Value>, Error> {
+    let request_id = Uuid::new_v4();
+    let user_id = request.auth_token().token().get_payload().sub.parse::<Uuid>()?;
+    let mut logger = LogFormatter::new(ip, user_id, request_id);
+
+    info!("{}", serde_json::to_string(&logger.with_message("Rate limit checking".into()).with_timestamp(Utc::now()))?);
+    rate_limit_check(shared_state.clone(), &request.auth_token(), ip).await?;
+
+    let () = shared_state.postgres_pool.delete_uac_policy(&request.auth_token(), request.policy_id(), ip, request_id).await?;
+
+    shared_state.user_access_control_policy_cache.remove(&request.policy_id()).await;
+
+    info!("{}", serde_json::to_string(&logger.with_message("Revoked policy".into()).with_timestamp(Utc::now()))?);
+
+    Ok(Json(json!({ "message": "Revoked policy" })))
+}
+
+#[tracing::instrument(skip(shared_state, request, ip), name = "GET CASE DETAILS")]
+pub async fn get_case_details(State(shared_state): State<SharedState>, ClientIp(ip): ClientIp, Json(request): Json<CaseAccess>) -> Result<Json<Value>, Error> {
+    let request_id = Uuid::new_v4();
+    let user_id = request.auth_token().token().get_payload().sub.parse::<Uuid>()?;
+    let mut logger = LogFormatter::new(ip, user_id, request_id);
+
+    info!("{}", serde_json::to_string(&logger.with_message("Rate limit checking".into()).with_timestamp(Utc::now()))?);
+    rate_limit_check(shared_state.clone(), &request.auth_token(), ip).await?;
+
+    info!("{}", serde_json::to_string(&logger.with_message("Checking if user has access to case".into()).with_timestamp(Utc::now()))?);
+    let user_access_control = UserAccessControlDefinition::new(user_id, Some(request.case_number()), None, request.auth_token().clone())?;
+    shared_state.postgres_pool.is_access_granted(&user_access_control, false, ip, request_id).await?;
+
+    if shared_state.case_details_cache.contains_key(&request.case_number()) {
+        info!("{}", serde_json::to_string(&logger.with_message("Case details found in cache".into()).with_timestamp(Utc::now()))?);
+        let case_details = shared_state.case_details_cache.entry(request.case_number().clone()).or_default().await.into_value();
+
+        info!("{}", serde_json::to_string(&logger.with_message("Fetched case details".into()).with_timestamp(Utc::now()))?);
+
+        Ok(Json(json!({"message": "Retrieved case details", "details": case_details })))
+    } else {
+        info!("{}", serde_json::to_string(&logger.with_message("Case details not found in cache, checking database".into()).with_timestamp(Utc::now()))?);
+        let details = shared_state.postgres_pool.get_case_details(&request, ip, request_id).await?;
+        
+        shared_state.case_details_cache.insert(request.case_number(), details.clone()).await;
+
+        info!("{}", serde_json::to_string(&logger.with_message("Fetched case details".into()).with_timestamp(Utc::now()))?);
+
+        Ok(Json(json!({ "message": "Retrieved case details", "details": details })))
+    }
 }
 
 #[tracing::instrument(skip(shared_state, token, ip), name = "GET ACCESSIBLE NOTES")]
@@ -310,12 +442,12 @@ pub async fn find_accessible_notes(State(shared_state): State<SharedState>, Clie
 }
 
 #[tracing::instrument(skip(shared_state, note, ip), name = "ADD NOTE TO CASE")]
-pub async fn insert_note(State(shared_state): State<SharedState>, ClientIp(ip): ClientIp, Json(note): Json<Notes>) -> Result<Json<Value>, Error> {
+pub async fn insert_note(State(shared_state): State<SharedState>, ClientIp(ip): ClientIp, Json(note): Json<NoteContext>) -> Result<Json<Value>, Error> {
     let request_id = Uuid::new_v4();
     let mut logger = LogFormatter::new(ip, note.auth_token().token().get_payload().sub.parse::<Uuid>()?, request_id);
     let logger = logger
         .with_case_number(Some(note.note_details().case_number()))
-        .with_note_id(Some(note.note_id()));
+        .with_note_id(note.note_id());
 
     info!("{}", serde_json::to_string(&logger.with_message("Rate limit checking".into()).with_timestamp(Utc::now()))?);
     rate_limit_check(shared_state.clone(), &note.auth_token(), ip).await?;
@@ -326,4 +458,49 @@ pub async fn insert_note(State(shared_state): State<SharedState>, ClientIp(ip): 
     info!("{}", serde_json::to_string(&logger.with_message("Note added to case".into()).with_timestamp(Utc::now()))?);
 
     Ok(Json(json!({"message": "Added note to case"})))
+}
+
+
+#[tracing::instrument(skip(shared_state, data, ip), name = "FETCH CASE NOTE")]
+pub async fn fetch_note(State(shared_state): State<SharedState>, ClientIp(ip): ClientIp, Json(data): Json<NoteContext>) -> Result<Json<Value>, Error> {
+    let request_id = Uuid::new_v4();
+    let user_id = data.auth_token().token().get_payload().sub.parse::<Uuid>()?;
+    let mut logger = LogFormatter::new(ip, user_id, request_id);
+
+    info!("{}", serde_json::to_string(&logger.with_message("Rate limit checking".into()).with_timestamp(Utc::now()))?);
+    rate_limit_check(shared_state.clone(), &data.auth_token(), ip).await?;
+
+    info!("{}", serde_json::to_string(&logger.with_message("Checking if user has access to note".into()).with_timestamp(Utc::now()))?);
+    let user_access_control = UserAccessControlDefinition::new(user_id, None, data.note_id(), data.auth_token())?;
+    shared_state.postgres_pool.is_access_granted(&user_access_control, false, ip, request_id).await?;
+
+    info!("{}", serde_json::to_string(&logger.with_message("Checking if note is in cache".into()).with_timestamp(Utc::now()))?);
+    let Some(note_id) = data.note_id() else {
+        let error = Error::ValueNotFound("note_id".into());
+        error!("{}", serde_json::to_string(&logger.with_message("Could not parse data".into()).with_timestamp(Utc::now()).with_error(Some(error.clone())))?);
+
+        return Err(error)
+    };
+
+    if shared_state.note_details_cache.contains_key(&note_id) {
+        info!("{}", serde_json::to_string(&logger.with_message("Note found in cache".into()).with_timestamp(Utc::now()))?);
+        let note_details = shared_state.note_details_cache.entry(note_id).or_default().await.into_value();
+
+        info!("{}", serde_json::to_string(&logger.with_message("Fetched note".into()).with_timestamp(Utc::now()))?);
+
+        Ok(Json(json!({"message": "Retrieved note", "note": note_details })))
+    } else {
+        info!("{}", serde_json::to_string(&logger.with_message("Note not found in cache, checking database".into()).with_timestamp(Utc::now()))?);
+        let note_details = shared_state.postgres_pool.fetch_note(&data, ip, request_id).await?;
+        let Some(details) = note_details.clone() else {
+            error!("{}", serde_json::to_string(&logger.with_message("Note not found in cache, checking database".into()).with_timestamp(Utc::now()))?);
+
+            return Err(Error::DatabaseError)
+        };
+        shared_state.note_details_cache.insert(note_id, details).await;
+
+        info!("{}", serde_json::to_string(&logger.with_message("Fetched note".into()).with_timestamp(Utc::now()))?);
+
+        Ok(Json(json!({"message": "Retrieved note", "note": note_details })))
+    }
 }

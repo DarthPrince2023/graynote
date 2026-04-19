@@ -1,17 +1,20 @@
 use axum_server::tls_rustls::RustlsConfig;
 use chrono::Utc;
 use colored::Colorize;
+use moka::{
+    future::{Cache, CacheBuilder}, policy::EvictionPolicy
+};
 use reqwest::Client;
 use sqlx::{Postgres, Pool, postgres::PgPoolOptions};
 use tokio::sync::Mutex;
 use tracing::{warn, info};
 use tracing_subscriber::{EnvFilter, fmt};
-use std::{collections::HashMap, env::var, fs::OpenOptions, net::IpAddr, sync::Arc};
-use graynote_lib::types::error::Error;
+use uuid::Uuid;
+use std::{collections::HashMap, env::var, fs::OpenOptions, net::IpAddr, sync::Arc, time::Duration};
+use graynote_lib::types::{error::Error, structs::{CaseInformation, NoteDetails, UserAccessControlPolicy}};
 
 use crate::routes::rate_limiter::RateLimiter;
 
-pub mod caching;
 pub mod post;
 pub mod rate_limiter;
 
@@ -24,7 +27,12 @@ pub struct SharedState {
     pub client: Client,
     pub key: String,
     pub user_rates: Arc<Mutex<HashMap<(String, IpAddr), RateLimiter>>>,
-    pub rustls_config: RustlsConfig
+    pub rustls_config: RustlsConfig,
+    pub username_cache: Cache<String, Uuid>,
+    pub case_information_cache: Cache<Uuid, CaseInformation>,
+    pub note_details_cache: Cache<Uuid, NoteDetails>,
+    pub case_details_cache: Cache<Uuid, (CaseInformation, Vec<NoteDetails>)>,
+    pub user_access_control_policy_cache: Cache<Uuid, UserAccessControlPolicy>
 }
 
 impl SharedState {
@@ -32,6 +40,51 @@ impl SharedState {
     /// instantiate a new shared state instance for our service
     /// 
     pub async fn new() -> Result<Self, Error> {
+        let username_cache: Cache<String, Uuid> = CacheBuilder::new(75_000)
+            .name("username_cache")
+            .eviction_policy(EvictionPolicy::tiny_lfu())
+            .initial_capacity(50_000)
+            .max_capacity(75_000)
+            .time_to_live(Duration::from_secs(3_600 * 24))
+            .time_to_idle(Duration::from_secs(3_600 * 6))
+            .build();
+
+        let case_information_cache: Cache<Uuid, CaseInformation> = CacheBuilder::new(50_000)
+            .name("case_information_cache")
+            .eviction_policy(EvictionPolicy::tiny_lfu())
+            .initial_capacity(25_000)
+            .max_capacity(50_000)
+            .time_to_live(Duration::from_secs(3_600 * 24))
+            .time_to_idle(Duration::from_secs(3_600 * 6))
+            .build();
+
+        let note_details_cache: Cache<Uuid, NoteDetails> = CacheBuilder::new(50_000)
+            .name("note_details_cache")
+            .eviction_policy(EvictionPolicy::tiny_lfu())
+            .initial_capacity(25_000)
+            .max_capacity(50_000)
+            .time_to_live(Duration::from_secs(3_600 * 24))
+            .time_to_idle(Duration::from_secs(3_600 * 6))
+            .build();
+
+        let user_access_control_policy_cache: Cache<Uuid, UserAccessControlPolicy> = CacheBuilder::new(50_000)
+            .name("user_access_control_policy_cache")
+            .eviction_policy(EvictionPolicy::tiny_lfu())
+            .initial_capacity(25_000)
+            .max_capacity(50_000)
+            .time_to_live(Duration::from_secs(3_600 * 24))
+            .time_to_idle(Duration::from_secs(3_600 * 6))
+            .build();
+
+        let case_details_cache: Cache<Uuid, (CaseInformation, Vec<NoteDetails>)> = CacheBuilder::new(25_000)
+            .name("case_details_cache")
+            .eviction_policy(EvictionPolicy::tiny_lfu())
+            .initial_capacity(15_000)
+            .max_capacity(25_000)
+            .time_to_live(Duration::from_secs(3_600 * 24))
+            .time_to_idle(Duration::from_secs(3_600 * 6))
+            .build();
+
         // Attempt to get a postgres connection
         Self::init_tracing()?;
 
@@ -87,6 +140,11 @@ impl SharedState {
                 client,
                 key,
                 user_rates,
+                username_cache,
+                case_information_cache,
+                note_details_cache,
+                case_details_cache,
+                user_access_control_policy_cache,
                 rustls_config
             }
         )
